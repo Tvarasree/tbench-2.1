@@ -1,0 +1,217 @@
+# =============================================================================
+# terminal-bench Evaluation Configuration
+# =============================================================================
+# Single source of truth for the harbor-based terminal-bench harness running
+# xyne-cli (and mainstream harbor agents) against grid.ai (juspay) models.
+#
+# Mirrors the structure of OLD STUFF/swe-auto-eval/config.yaml so the two
+# pipelines stay operationally consistent on the Batch VM.
+#
+# NOTE: run.sh is driven primarily by CLI flags supplied by the eval-runner
+# harness (see input_param schema in the dashboard). The values here are the
+# canonical DEFAULTS and the infra wiring (GAR / GCS) that the helper scripts
+# and run.sh fall back to when a flag is not supplied.
+# =============================================================================
+
+# =============================================================================
+# MODEL CONFIGURATIONS
+# =============================================================================
+# grid.ai is OpenAI-compatible. xyne-cli's provider key for it is "juspay".
+# Self-hosted / open-weights models only for the PoC sweep; paid models
+# (Claude, Gemini) are deliberately excluded until the script is proven.
+models:
+  private-large:
+    provider: juspay
+    base_url: https://grid.ai.juspay.net/v1
+    api: openai-completions
+    model_id: private-large
+
+  glm-latest:
+    provider: juspay
+    base_url: https://grid.ai.juspay.net/v1
+    api: openai-completions
+    model_id: glm-latest
+
+  kimi-latest:
+    provider: juspay
+    base_url: https://grid.ai.juspay.net/v1
+    api: openai-completions
+    model_id: kimi-latest
+
+  deepseek:
+    provider: juspay
+    base_url: https://grid.ai.juspay.net/v1
+    api: openai-completions
+    model_id: deepseek
+
+  # Other self-hosted ids known to be served by grid.ai. Uncomment / add as
+  # needed; they all share the same endpoint + provider.
+  # nemotron:        { provider: juspay, base_url: https://grid.ai.juspay.net/v1, api: openai-completions, model_id: nemotron }
+  # gemma-4:         { provider: juspay, base_url: https://grid.ai.juspay.net/v1, api: openai-completions, model_id: gemma-4 }
+  # minimaxai/minimax-m2: { provider: juspay, base_url: https://grid.ai.juspay.net/v1, api: openai-completions, model_id: minimaxai/minimax-m2 }
+
+# =============================================================================
+# AGENT CONFIGURATIONS
+# =============================================================================
+# xyne-cli is our custom harbor agent (adapter/xyne_harbor_agent). The rest are
+# harbor built-ins, pitted against xyne-cli on the same dataset/model.
+#
+#   model_format — how the model id is passed to `harbor run --model`.
+#     {MODEL} is substituted with the --model value. If the caller already
+#     passes "provider/model" (contains a slash) it is used verbatim.
+agents:
+  xyne-cli:
+    kind: custom
+    import_path: xyne_harbor_agent.agent:XyneCliAgent
+    model_format: "juspay/{MODEL}"
+    description: "Custom adapter: uploads xyne-linux-{arch} binary, runs `xyne prompt`"
+
+  claude-code:
+    kind: harbor-builtin
+    model_format: "{MODEL}"
+    description: "harbor built-in claude-code (routed at grid.ai via ANTHROPIC_BASE_URL)"
+
+  opencode:
+    kind: harbor-builtin
+    model_format: "Grid/{MODEL}"
+    description: "harbor built-in opencode; custom @ai-sdk/openai-compatible 'Grid' provider"
+
+  pi:
+    kind: harbor-builtin
+    model_format: "openai/{MODEL}"
+    description: "harbor built-in pi (pi-mono) via standard openai provider"
+
+  aider:
+    kind: harbor-builtin
+    model_format: "openai/{MODEL}"
+    description: "harbor built-in aider via standard openai provider"
+
+  goose:
+    kind: harbor-builtin
+    model_format: "openai/{MODEL}"
+    description: "harbor built-in goose"
+
+  codex:
+    kind: harbor-builtin
+    model_format: "openai/{MODEL}"
+    description: "harbor built-in codex"
+
+# =============================================================================
+# DATASET CONFIGURATION
+# =============================================================================
+# The harbor task PACKAGES (task.toml / Dockerfile / tests — small text/config,
+# NOT the heavy images) are cached under ~/.cache/harbor/tasks. On a fresh
+# Batch VM we restore them from a pre-built tarball in GCS (fetched once),
+# falling back to `harbor download` if the tarball is unavailable.
+dataset:
+  name: terminal-bench/terminal-bench-2-1
+  task_count: 89
+  harbor_cache_subdir: tasks            # ~/.cache/harbor/<subdir>
+
+  # One-time tarball produced by scripts/make_dataset_tarball.sh and consumed
+  # by scripts/fetch_dataset_tarball.sh (invoked from setup.sh).
+  tarball:
+    gcs_uri: gs://xyne-eval-dashboard/terminal-bench/datasets/terminal-bench-2-1-tasks.tar.zst
+    sha256_gcs_uri: gs://xyne-eval-dashboard/terminal-bench/datasets/terminal-bench-2-1-tasks.tar.zst.sha256
+
+# =============================================================================
+# XYNE-CLI BINARY (fetched once, like the dataset)
+# =============================================================================
+# The xyne-cli npm package isn't linux-ready yet and the local build chain is
+# fragile, so we ship prebuilt linux binaries via GCS. scripts/
+# upload_xyne_binaries.sh pushes them ONCE (sha256 side-cars); setup.sh runs
+# scripts/fetch_xyne_binaries.sh to restore them into ./binaries on each VM.
+# The adapter then uploads the arch-correct binary into each task container.
+xyne_binary:
+  local_dir: binaries                  # repo-relative; adapter's DEFAULT_BINARY_DIR
+  files:
+    - name: xyne-linux-x64
+      gcs_uri: gs://xyne-eval-dashboard/terminal-bench/binaries/xyne-linux-x64
+    - name: xyne-linux-arm64
+      gcs_uri: gs://xyne-eval-dashboard/terminal-bench/binaries/xyne-linux-arm64
+    - name: package.json
+      gcs_uri: gs://xyne-eval-dashboard/terminal-bench/binaries/package.json
+
+# =============================================================================
+# GOOGLE ARTIFACT REGISTRY (task image cache)
+# =============================================================================
+# Each task.toml declares  [environment] docker_image = "alexgshaw/<task>:<tag>"
+# (all 89 are alexgshaw/<repo>:<{20251031|20260403|20260430}>). harbor uses
+# that prebuilt image instead of building the Dockerfile.
+#
+# To avoid Docker Hub rate limits / arch-mismatch (the published images are
+# amd64; Batch VMs ARE amd64 so this is correct there) we mirror every image
+# into GAR ONCE (scripts/seed_gar_images.py) and pull from GAR on every run
+# (scripts/pull_tb_images.py), re-tagging back to the exact Docker Hub name
+# harbor expects so harbor never reaches out to Docker Hub.
+#
+# Naming mirrors swe-bench's rule: replace the FIRST '/' with '-' and prefix.
+#   src: alexgshaw/adaptive-rejection-sampler:20251031
+#   gar: us-central1-docker.pkg.dev/xyne-dev-461113/eval-dashboard/
+#        tbench-alexgshaw-adaptive-rejection-sampler:20251031
+gar:
+  registry_url: us-central1-docker.pkg.dev/xyne-dev-461113/eval-dashboard
+  image_prefix: tbench-
+  # Platform the Batch VM runs (COS Batch VMs are x86_64). seed_gar_images.py
+  # pins pulls to this platform so we never push an emulated/arch-wrong image.
+  platform: linux/amd64
+  # Manifest written by seed_gar_images.py and read by pull_tb_images.py:
+  # task -> { source, gar_ref, digest }. Lives next to this config.
+  manifest_path: scripts/seeded_images.json
+
+# =============================================================================
+# EVALUATION DEFAULTS  (overridable by run.sh CLI flags / input_param.json)
+# =============================================================================
+evaluation:
+  agent: xyne-cli
+  model: private-large
+  base_url: https://grid.ai.juspay.net/v1
+
+  concurrency: 1            # harbor --n-concurrent
+  attempts: 3               # harbor --n-attempts (pass@k)
+  agent_timeout_multiplier: ""   # "" = use each task's declared timeout
+
+  # Default task selection when none specified: a single quick task.
+  default_task: regex-log
+
+  # Where the standardized results file is written. The eval-runner injects
+  # EVAL_RUNNER_OUTPUT_DIR (== repo/output). We honor it, else fall back to
+  # <repo>/output (identical to swe-auto-eval's RUNNER_OUTPUT_ROOT).
+  output_dir_env: EVAL_RUNNER_OUTPUT_DIR
+  output_dir_fallback: output
+
+# =============================================================================
+# ENVIRONMENT
+# =============================================================================
+environment:
+  # grid.ai key. The eval-runner prepends it as the first positional arg when
+  # grid_ai_api_key is configured; manual callers export XYNE_API_KEY instead.
+  XYNE_API_KEY: ${XYNE_API_KEY}
+  XYNE_BASE_URL: https://grid.ai.juspay.net/v1
+  # Docker socket — DooD via the host bind-mount on Batch VMs.
+  DOCKER_HOST: unix:///var/run/docker.sock
+
+# =============================================================================
+# PRESETS (manual convenience; the dashboard supplies its own params)
+# =============================================================================
+presets:
+  smoke:
+    agent: xyne-cli
+    model: private-large
+    selector: "--task regex-log"
+    attempts: 1
+    concurrency: 1
+
+  xyne_full:
+    agent: xyne-cli
+    model: private-large
+    selector: "--all"
+    attempts: 3
+    concurrency: 10
+
+  opencode_full:
+    agent: opencode
+    model: private-large
+    selector: "--all"
+    attempts: 3
+    concurrency: 10

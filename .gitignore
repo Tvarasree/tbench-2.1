@@ -1,0 +1,34 @@
+# macOS
+.DS_Store
+
+# Python cache
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Secrets / local env
+.env
+
+# Harbor session logs (synced by the eval-runner as repo/logs/), legacy runs/,
+# and the standardized results dir (synced as repo/output/)
+logs/
+runs/
+output/
+
+# Helper-script logs
+scripts/logs/
+
+# The seeding manifest is environment-specific (digests of YOUR pushed
+# images). Regenerate with seed_gar_images.py rather than committing it.
+scripts/seeded_images.json
+
+# Local virtualenv (if a caller makes one; harbor uses an isolated uv tool)
+venv/
+.venv/
+
+# Large vendored binaries — these come from the sibling xyne-cli build, not
+# git. `binaries` itself is a symlink to ../xyne-cli/binaries, so ignore the
+# whole entry rather than just its contents.
+/binaries
+binaries/xyne-linux-*
+binaries/package.json

@@ -1,0 +1,13 @@
+# terminal-bench helper-script dependencies.
+#
+# harbor itself is installed as an isolated `uv tool` (see setup.sh) and is
+# NOT listed here. These deps are only for the orchestration helpers in
+# scripts/ (seed_gar_images.py, pull_tb_images.py) and config parsing.
+#
+# Deliberately minimal: the image scripts shell out to the `docker` CLI
+# instead of docker-py, because docker-py 7.x silently swallows credHelper
+# (gcloud) auth errors and reports them as ImageNotFound — the exact failure
+# mode swe-bench's docker_build.py documents and works around.
+
+PyYAML>=6.0
+tomli>=2.0.1 ; python_version < "3.11"   # task.toml parsing; stdlib tomllib on 3.11+
