@@ -90,7 +90,15 @@ class XyneCliAgent(BaseInstalledAgent):
                 f"Run: cp ~/Paul\\ Tests/xyne-cli/package.json {package_json}"
             )
 
-        await self.exec_as_root(environment, "mkdir -p /opt/xyne /root/.xyne/agent")
+        # Redirect xyne's session transcripts (getAgentDir()/sessions, i.e.
+        # /root/.xyne/agent/sessions/*.jsonl) into the bind-mounted /logs/agent
+        # so harbor captures them even when the run is cancelled on timeout.
+        # Only `sessions` is symlinked — models.json (API key) stays out of /logs.
+        await self.exec_as_root(
+            environment,
+            "mkdir -p /opt/xyne /root/.xyne/agent /logs/agent/sessions "
+            "&& ln -sfn /logs/agent/sessions /root/.xyne/agent/sessions",
+        )
         await environment.upload_file(str(binary), "/opt/xyne/xyne")
         await environment.upload_file(str(package_json), "/opt/xyne/package.json")
         await self.exec_as_root(
