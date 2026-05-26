@@ -303,15 +303,85 @@ setup_dataset() {
 }
 
 # ---------------------------------------------------------------------------
-# 9. xyne-cli binaries — restore from GCS.
+# 9. xyne-cli binaries — pull straight from the npm registry.
+#
+# As of @xyne/xyne-cli >= 0.1.1 the published tarball ships the linux binaries
+# (`binaries/xyne-linux-x64`, `binaries/xyne-linux-arm64`) and `package.json`
+# at the top level, so we no longer need the GCS mirror / per-binary sha256
+# side-cars. curl+tar only — no node/npm runtime dep on the Batch VM.
 # ---------------------------------------------------------------------------
 setup_xyne_binaries() {
-  header "xyne-cli binaries"
-  if bash "${SCRIPT_DIR}/scripts/fetch_xyne_binaries.sh"; then
-    ok "xyne binaries ready"
+  header "xyne-cli binaries (from npm)"
+
+  LOCAL_DIR="${SCRIPT_DIR}/binaries"
+  PKG=$(python3 - "${SCRIPT_DIR}/config.yaml" <<'PY' 2>/dev/null || echo "@xyne/xyne-cli"
+import sys, yaml
+cfg = yaml.safe_load(open(sys.argv[1], encoding="utf-8")) or {}
+print((cfg.get("xyne_binary") or {}).get("npm_package", "@xyne/xyne-cli"))
+PY
+)
+
+  # Idempotent + local-dev-friendly: if the dir is already populated (incl.
+  # via the repo's `binaries -> ../xyne-cli/binaries` symlink on a dev box),
+  # skip the fetch.
+  if [ -s "${LOCAL_DIR}/xyne-linux-x64" ] && [ -s "${LOCAL_DIR}/package.json" ]; then
+    ok "xyne binaries already present at ${LOCAL_DIR}"
+    return 0
+  fi
+
+  # On a fresh Batch VM the `binaries` repo symlink points at a sibling that
+  # doesn't exist (broken link). Replace it with a real dir before fetching.
+  if [ -L "${LOCAL_DIR}" ] && [ ! -e "${LOCAL_DIR}" ]; then
+    info "Removing broken symlink ${LOCAL_DIR}"
+    rm -f "${LOCAL_DIR}"
+  fi
+  mkdir -p "${LOCAL_DIR}"
+
+  info "Resolving latest tarball for ${PKG} from the npm registry..."
+  TARBALL_URL=$(curl -fsSL "https://registry.npmjs.org/${PKG}/latest" 2>/dev/null \
+    | python3 -c 'import sys,json; print(json.load(sys.stdin)["dist"]["tarball"])' 2>/dev/null)
+  if [ -z "${TARBALL_URL}" ]; then
+    warn "Could not resolve ${PKG} tarball URL — xyne-cli agent will be unavailable"
+    warn "(claude-code / opencode / pi / aider still work.)"
+    return 0
+  fi
+
+  TMP_DIR="$(mktemp -d)"
+  TMP_TAR="${TMP_DIR}/pkg.tgz"
+  info "Downloading ${TARBALL_URL}"
+  if ! curl -fsSL "${TARBALL_URL}" -o "${TMP_TAR}"; then
+    warn "Could not download xyne-cli tarball — xyne-cli agent will be unavailable"
+    rm -rf "${TMP_DIR}"; return 0
+  fi
+  if ! tar -xzf "${TMP_TAR}" -C "${TMP_DIR}"; then
+    warn "Failed to extract xyne-cli tarball — xyne-cli agent will be unavailable"
+    rm -rf "${TMP_DIR}"; return 0
+  fi
+
+  # npm tarballs have a `package/` top-level prefix.
+  SRC="${TMP_DIR}/package"
+  PKG_VERSION=$(python3 -c "import json; print(json.load(open('${SRC}/package.json'))['version'])" 2>/dev/null || echo "?")
+  any=0
+  for f in xyne-linux-x64 xyne-linux-arm64; do
+    if [ -s "${SRC}/binaries/${f}" ]; then
+      cp "${SRC}/binaries/${f}" "${LOCAL_DIR}/${f}"
+      chmod +x "${LOCAL_DIR}/${f}"
+      ok "  -> ${LOCAL_DIR}/${f}"
+      any=1
+    else
+      warn "  ${f} missing from npm tarball — skipping"
+    fi
+  done
+  if [ -s "${SRC}/package.json" ]; then
+    cp "${SRC}/package.json" "${LOCAL_DIR}/package.json"
+    ok "  -> ${LOCAL_DIR}/package.json"
+  fi
+  rm -rf "${TMP_DIR}"
+
+  if [ "${any}" = 1 ]; then
+    ok "xyne-cli binaries fetched from npm (${PKG}@${PKG_VERSION})"
   else
-    warn "xyne binaries unavailable — only the xyne-cli agent is affected;"
-    warn "claude-code / opencode / pi / aider still work."
+    warn "No xyne-cli linux binaries in the tarball — only xyne-cli agent affected"
   fi
 }
 

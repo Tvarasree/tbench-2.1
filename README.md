@@ -76,13 +76,12 @@ corrupt.
    python3 scripts/seed_gar_images.py --dry-run # plan (no docker)
    python3 scripts/seed_gar_images.py           # pull→retag→push→VERIFY all 89
    ```
-3. **Publish the xyne-cli linux binaries** (built from the sibling `xyne-cli`):
-   ```bash
-   ./scripts/upload_xyne_binaries.sh            # binaries/* → GCS (+ .sha256)
-   ```
+The xyne-cli linux binaries no longer need a separate one-time publish step —
+they ship inside the `@xyne/xyne-cli` npm package (>= 0.1.1), and `setup.sh`
+pulls the tarball straight from the npm registry on each VM.
 
 Targets are all configured in `config.yaml`
-(`gar.registry_url`, `dataset.tarball.*`, `xyne_binary.*`).
+(`gar.registry_url`, `dataset.tarball.*`, `xyne_binary.npm_package`).
 
 ### Integrity guarantee for `seed_gar_images.py`
 
@@ -111,7 +110,7 @@ documented in `swe-auto-eval`'s `docker_build.py`.
 `docker login`, persisted to `/var/lib/docker/gcloud-env.sh`) → Python 3.11+ →
 `uv` → `harbor` + xyne adapter (one `uv tool` env) → helper deps → **dataset
 restore** (`fetch_dataset_tarball.sh`, falls back to `harbor download`) →
-**binary restore** (`fetch_xyne_binaries.sh`) → `.cli_paths.sh` → verify.
+**xyne binary fetch** (npm registry → `./binaries/`) → `.cli_paths.sh` → verify.
 
 `run.sh`: sources `gcloud-env.sh` → parses the contract → selects tasks →
 **pre-pulls the selected images from GAR** and retags them to the exact name
@@ -152,11 +151,11 @@ terminal-bench/
 ├── scripts/
 │   ├── seed_gar_images.py      # ONE-TIME: task images → GAR (digest-verified)
 │   ├── make_dataset_tarball.sh # ONE-TIME: ~/.cache/harbor/tasks → GCS
-│   ├── upload_xyne_binaries.sh # ONE-TIME: binaries → GCS
 │   ├── pull_tb_images.py       # per-run: GAR → local (harbor-expected name)
-│   ├── fetch_dataset_tarball.sh# setup.sh: GCS → ~/.cache/harbor (verified)
-│   └── fetch_xyne_binaries.sh  # setup.sh: GCS → ./binaries (verified)
-├── binaries -> ../xyne-cli/binaries   # local dev symlink; real dir on the VM
+│   └── fetch_dataset_tarball.sh# setup.sh: GCS → ~/.cache/harbor (verified)
+├── binaries -> ../xyne-cli/binaries   # local dev symlink; setup.sh replaces it
+│                                      # with a real dir + npm-fetched binaries
+│                                      # on a fresh VM
 └── runs/                       # harbor job outputs
 ```
 

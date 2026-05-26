@@ -115,22 +115,17 @@ dataset:
     sha256_gcs_uri: gs://xyne-eval-dashboard/terminal-bench/datasets/terminal-bench-2-1-tasks.tar.zst.sha256
 
 # =============================================================================
-# XYNE-CLI BINARY (fetched once, like the dataset)
+# XYNE-CLI BINARY (pulled from the npm registry on each VM)
 # =============================================================================
-# The xyne-cli npm package isn't linux-ready yet and the local build chain is
-# fragile, so we ship prebuilt linux binaries via GCS. scripts/
-# upload_xyne_binaries.sh pushes them ONCE (sha256 side-cars); setup.sh runs
-# scripts/fetch_xyne_binaries.sh to restore them into ./binaries on each VM.
-# The adapter then uploads the arch-correct binary into each task container.
+# As of @xyne/xyne-cli >= 0.1.1 the published tarball ships the prebuilt linux
+# binaries (`binaries/xyne-linux-x64`, `binaries/xyne-linux-arm64`) and the
+# `package.json` at the top level. setup.sh resolves the latest tarball URL
+# from the npm registry, downloads it with curl, and extracts those files into
+# ./binaries — no GCS mirror, no node/npm runtime dependency on the VM. The
+# adapter then uploads the arch-correct binary into each task container.
 xyne_binary:
   local_dir: binaries                  # repo-relative; adapter's DEFAULT_BINARY_DIR
-  files:
-    - name: xyne-linux-x64
-      gcs_uri: gs://xyne-eval-dashboard/terminal-bench/binaries/xyne-linux-x64
-    - name: xyne-linux-arm64
-      gcs_uri: gs://xyne-eval-dashboard/terminal-bench/binaries/xyne-linux-arm64
-    - name: package.json
-      gcs_uri: gs://xyne-eval-dashboard/terminal-bench/binaries/package.json
+  npm_package: "@xyne/xyne-cli"        # resolved against https://registry.npmjs.org
 
 # =============================================================================
 # GOOGLE ARTIFACT REGISTRY (task image cache)
