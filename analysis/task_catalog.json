@@ -1,0 +1,4260 @@
+{
+  "schema_version": 1,
+  "source": {
+    "upstream_repo": "harbor-framework/terminal-bench",
+    "branch": "v0.2.x/tasks + main/original-tasks",
+    "fetched": "2026-05-20",
+    "note": "Catalog covers 148 tasks combining the v0.2.x branch's tasks/ dir (94 entries) and main's original-tasks/ dir (53 entries from your terminal-bench-2-1 pin + 1 sentinel 'headless-terminal' that is genuinely missing upstream). Verified to fully cover the 89-task terminal-bench-2-1 dataset used by the harness (intersection = 89). The reporter silently ignores tasks not present in the input results.json so catalog/dataset drift is non-fatal. Each entry's upstream fields are copied verbatim from the task.yaml that bears that task id (except 'headless-terminal' which is a sentinel). The taxonomy.domain string follows '<upstream-category> (<my-domain> \u2014 <one-line elaboration>)'. The capability list is the orthogonal diagnostic axis."
+  },
+  "capability_taxonomy": {
+    "exploration": "Navigates unknown directory structures and discovers relevant files.",
+    "file_editing": "Single- or multi-file mutation; not just writing one file from scratch.",
+    "shell_pipeline": "Composes UNIX tools (grep/awk/sed/jq/find/xargs/etc.) into pipelines.",
+    "language_python": "Writes or debugs Python code.",
+    "language_c_cpp": "Writes or debugs C / C++ code.",
+    "language_other": "Writes or debugs in another language (Rust, Go, Fortran, COBOL, JS, Coq, UPC, etc.).",
+    "build_compile": "Invokes build systems, links, configures toolchains, compiles code.",
+    "container_ops": "Manipulates Docker / QEMU / sandbox internals.",
+    "networking": "Configures or interacts with network services / sockets / HTTP.",
+    "test_driven_loop": "Runs tests, reads failures, iterates toward green.",
+    "long_horizon": "Needs many turns or multi-stage planning; timeout >= 900s or interactive.",
+    "error_recovery": "Interprets error output and reacts; not just retrying blindly.",
+    "self_verification": "Proactively checks its own output before declaring success.",
+    "algorithms": "Non-trivial CS algorithms \u2014 graphs, DP, simulation, search, proof.",
+    "cryptography": "Encrypt / decrypt / hash / crack workflows.",
+    "reverse_engineering": "Extracts info from opaque formats, binaries, or obfuscated artifacts.",
+    "ml_workflow": "Training, inference, evaluation, registry interaction.",
+    "data_processing": "Large-scale CSV / JSON / parquet / log transformation.",
+    "git_workflow": "Recovery, multibranch surgery, conflict resolution, history rewriting."
+  },
+  "tasks": [
+    {
+      "id": "aimo-airline-departures",
+      "one_liner": "Solve a modular-arithmetic problem about three airlines with overlapping departure cycles.",
+      "upstream": {
+        "category": "mathematics",
+        "tags": [
+          "mathematics",
+          "modular-arithmetic",
+          "scheduling",
+          "number-theory",
+          "lcm-gcd"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 480
+      },
+      "taxonomy": {
+        "domain": "mathematics (Algorithmic / Computational \u2014 pure number-theory word problem)",
+        "capabilities": [
+          "algorithms",
+          "language_python",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "misreads_problem_constraints",
+        "off_by_one_in_lcm",
+        "accepts_first_guess_without_check"
+      ],
+      "diagnostic_note": "Tests symbolic reasoning more than coding. Failure here paired with other 'mathematics' tasks failing indicates weak abstract reasoning; failure alone with success on other math tasks usually means the agent didn't sanity-check its arithmetic before submitting."
+    },
+    {
+      "id": "attention-mil",
+      "one_liner": "Implement the missing forward pass of an ABMIL (Attention-Based Multiple Instance Learning) pytorch model for medical images.",
+      "upstream": {
+        "category": "model-training",
+        "tags": [
+          "pytorch-attention-mechanism",
+          "medical-image-analysis",
+          "multiple-instance-learning"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 600
+      },
+      "taxonomy": {
+        "domain": "model-training (ML Workflow \u2014 complete a partial pytorch model definition under a fixed test harness)",
+        "capabilities": [
+          "language_python",
+          "ml_workflow",
+          "test_driven_loop",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_tensor_shape",
+        "misses_softmax_or_sum_axis",
+        "fails_to_run_provided_tests"
+      ],
+      "diagnostic_note": "Code-completion under a pytest harness. Failure paired with other ml_workflow tasks indicates pytorch fluency gap; failure paired with other test_driven_loop tasks indicates the agent didn't iterate against the provided tests."
+    },
+    {
+      "id": "blind-maze-explorer-5x5",
+      "one_liner": "Map a 5x5 maze by running a provided exploration interface; submit the full map.",
+      "upstream": {
+        "category": "games",
+        "tags": [
+          "maze",
+          "exploration",
+          "mapping",
+          "algorithms"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "games (Algorithmic / Computational \u2014 interactive exploration under partial observability)",
+        "capabilities": [
+          "algorithms",
+          "long_horizon",
+          "language_python",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "incomplete_coverage",
+        "loses_state_across_turns",
+        "off_by_one_in_grid_coords"
+      ],
+      "diagnostic_note": "Tests long-horizon state tracking over many interaction turns. Failure clusters with other long_horizon tasks indicate context-management weakness; failure alone with success on the larger algorithmic variant means coverage-stopping criterion was wrong. Compare with blind-maze-explorer-algorithm \u2014 passing the harder algorithm variant while failing this one is a tell that the agent over-relies on closed-form solutions and breaks on interactive ones."
+    },
+    {
+      "id": "blind-maze-explorer-algorithm",
+      "one_liner": "Implement a general blind-maze exploration algorithm that maps any unknown maze.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "maze",
+          "coding",
+          "algorithms"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Algorithmic / Computational \u2014 implement a generic maze-mapping algorithm with a known interface)",
+        "capabilities": [
+          "algorithms",
+          "language_python",
+          "long_horizon",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "dfs_without_cycle_check",
+        "wrong_termination_condition",
+        "fails_on_larger_grids"
+      ],
+      "diagnostic_note": "Closed-form variant of the maze problem \u2014 agent writes an algorithm, not steps. Passing this while failing blind-maze-explorer-5x5 = closed-form reasoning works, interactive control doesn't."
+    },
+    {
+      "id": "broken-networking",
+      "one_liner": "Fix broken networking on the container so curl example.com works.",
+      "upstream": {
+        "category": "system-administration",
+        "tags": [
+          "sys-admin",
+          "networking",
+          "troubleshooting"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "system-administration (System Administration \u2014 diagnose and fix Linux network config)",
+        "capabilities": [
+          "networking",
+          "exploration",
+          "shell_pipeline",
+          "error_recovery"
+        ]
+      },
+      "failure_modes": [
+        "checks_only_one_layer (DNS but not route, or vice versa)",
+        "applies_band_aid_route_without_persistence",
+        "doesnt_verify_with_curl_after_fix"
+      ],
+      "diagnostic_note": "Multi-layer troubleshooting (DNS / route / iptables / interface). Failure with other networking tasks failing indicates network-stack knowledge gap; failure with error_recovery tasks failing means the agent didn't read the right diagnostics (ip a / ip route / cat /etc/resolv.conf)."
+    },
+    {
+      "id": "broken-python",
+      "one_liner": "Diagnose why pip can't install packages on this machine and fix it.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "coding",
+          "system",
+          "troubleshooting"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Software Engineering \u2014 diagnose a Python installation that's broken at the system level)",
+        "capabilities": [
+          "exploration",
+          "error_recovery",
+          "shell_pipeline",
+          "language_python"
+        ]
+      },
+      "failure_modes": [
+        "fixes_pip_but_not_underlying_python",
+        "reinstalls_without_checking_what_broke",
+        "ignores_PYTHONPATH_or_venv_state"
+      ],
+      "diagnostic_note": "Pip failures are usually one of: corrupt venv, broken symlink, missing CA bundle, wrong python on PATH, or distro-restricted-install. Failure here paired with broken-networking failure indicates the agent doesn't read full stderr."
+    },
+    {
+      "id": "build-initramfs-qemu",
+      "one_liner": "Build a working initramfs.cpio.gz so a pre-built linux kernel boots in qemu and prints 'hello world'.",
+      "upstream": {
+        "category": "system-administration",
+        "tags": [],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "system-administration (System Administration \u2014 produce a bootable initramfs from busybox/static-binaries)",
+        "capabilities": [
+          "container_ops",
+          "shell_pipeline",
+          "build_compile",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "forgets_init_script",
+        "wrong_cpio_format",
+        "doesnt_boot_test_in_qemu"
+      ],
+      "diagnostic_note": "Tests Linux-internals depth. Failure paired with build-linux-kernel-qemu and build-tcc-qemu failing indicates weak low-level systems knowledge; failure alone with the others passing means the agent stopped before booting the produced image."
+    },
+    {
+      "id": "build-linux-kernel-qemu",
+      "one_liner": "Compile the linux-6.9 kernel from source so it boots in qemu with the provided initramfs.",
+      "upstream": {
+        "category": "system-administration",
+        "tags": [],
+        "difficulty": "medium",
+        "timeout_sec": 1800
+      },
+      "taxonomy": {
+        "domain": "system-administration (System Administration \u2014 full kernel build with a minimal working config)",
+        "capabilities": [
+          "build_compile",
+          "container_ops",
+          "long_horizon",
+          "shell_pipeline",
+          "error_recovery"
+        ]
+      },
+      "failure_modes": [
+        "wrong_kconfig_for_qemu",
+        "misses_required_y_options",
+        "compile_errors_unrecovered"
+      ],
+      "diagnostic_note": "Tests both build patience and kconfig literacy. 1800s timeout \u2014 agent must orchestrate make olddefconfig and react to errors. Failure paired with long_horizon failures usually means the agent gave up before make finished."
+    },
+    {
+      "id": "build-tcc-qemu",
+      "one_liner": "Cross-compile tcc, package as ISO, attach to running qemu so tcc is available inside the VM.",
+      "upstream": {
+        "category": "system-administration",
+        "tags": [],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "system-administration (System Administration \u2014 produce a binary inside a qemu VM via an ISO mount)",
+        "capabilities": [
+          "build_compile",
+          "container_ops",
+          "shell_pipeline",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "builds_host_binary_not_target",
+        "wrong_iso_format",
+        "forgets_to_attach_via_qemu_arg"
+      ],
+      "diagnostic_note": "Cross-target reasoning. The agent must remember it's producing a binary for the VM's userland, not the host. Failure paired with build-initramfs-qemu indicates target-vs-host confusion."
+    },
+    {
+      "id": "cartpole-rl-training",
+      "one_liner": "Train a pytorch RL agent on CartPole-v1 to a passing reward threshold.",
+      "upstream": {
+        "category": "model-training",
+        "tags": [
+          "pytorch",
+          "RL"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "model-training (ML Workflow \u2014 implement and train a small RL algorithm under a time budget)",
+        "capabilities": [
+          "ml_workflow",
+          "language_python",
+          "long_horizon",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "doesnt_converge_in_budget",
+        "wrong_reward_sign",
+        "forgets_target_network_or_buffer"
+      ],
+      "diagnostic_note": "Tight 360s budget for actual training \u2014 agent must pick a sample-efficient algorithm (e.g., REINFORCE or small DQN). Failure paired with other ml_workflow tasks indicates pytorch+RL weakness; failure alone usually means hyperparameters / convergence-judgment gap."
+    },
+    {
+      "id": "chem-property-targeting",
+      "one_liner": "Build a molecular-search agent that finds compounds matching property queries.",
+      "upstream": {
+        "category": "scientific-computing",
+        "tags": [
+          "chemistry",
+          "data-processing",
+          "scientific-computation",
+          "molecular-modeling"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 600
+      },
+      "taxonomy": {
+        "domain": "scientific-computing (Scientific Computing \u2014 cheminformatics filtering pipeline with RDKit/similar)",
+        "capabilities": [
+          "language_python",
+          "data_processing",
+          "ml_workflow",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_rdkit_API",
+        "misses_filter_intersection",
+        "doesnt_run_full_query_suite"
+      ],
+      "diagnostic_note": "Domain-tool reach test (rdkit). Failure paired with raman-fitting and chem-rf indicates scientific-Python ecosystem unfamiliarity; failure alone usually means query semantics misread."
+    },
+    {
+      "id": "chem-rf",
+      "one_liner": "Train a sklearn model that predicts molecular binding affinity to a benchmark threshold.",
+      "upstream": {
+        "category": "model-training",
+        "tags": [
+          "chemistry",
+          "ml",
+          "cheminformatics",
+          "molecules"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 86400
+      },
+      "taxonomy": {
+        "domain": "model-training (ML Workflow \u2014 long-horizon training task with featurization, training, and benchmark-pass criterion)",
+        "capabilities": [
+          "ml_workflow",
+          "language_python",
+          "data_processing",
+          "long_horizon",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "weak_featurization",
+        "no_cross_validation",
+        "stops_at_first_model"
+      ],
+      "diagnostic_note": "86400s timeout = 24h \u2014 the agent has lots of room but must self-pace experiments. A 'no-grade' here is almost always the agent giving up early or producing an unloadable artifact, not a real failure. Pair with other long_horizon tasks for the planning-horizon signal."
+    },
+    {
+      "id": "chess-best-move",
+      "one_liner": "Read a chess board image, find the best move for white, write to /app/move.txt.",
+      "upstream": {
+        "category": "games",
+        "tags": [],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "games (Algorithmic / Computational \u2014 vision-and-search problem: parse board, plug into engine)",
+        "capabilities": [
+          "language_python",
+          "algorithms",
+          "shell_pipeline",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "fen_parse_wrong",
+        "calls_engine_with_wrong_side_to_move",
+        "picks_first_legal_move"
+      ],
+      "diagnostic_note": "Two-stage task (image \u2192 FEN \u2192 engine). Failure with chess-related tasks failing = chess-engine reach gap; failure alone with other vision tasks passing means board-parsing went wrong."
+    },
+    {
+      "id": "cobol-modernization",
+      "one_liner": "Port a COBOL data-processing program to a modern language while preserving exact .DAT outputs.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "coding"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Software Engineering \u2014 port legacy COBOL to modern code with byte-identical output)",
+        "capabilities": [
+          "language_other",
+          "file_editing",
+          "self_verification",
+          "test_driven_loop"
+        ]
+      },
+      "failure_modes": [
+        "misreads_PIC_clauses",
+        "wrong_record_padding",
+        "loses_fixed-width_format"
+      ],
+      "diagnostic_note": "Tests language-other reach (COBOL) plus exact-output discipline. Failure paired with other language_other tasks indicates non-mainstream language gap; failure alone with other ports passing means byte-equivalence wasn't verified."
+    },
+    {
+      "id": "conda-env-conflict-resolution",
+      "one_liner": "Resolve a conda dependency conflict so a data-science project's environment installs cleanly.",
+      "upstream": {
+        "category": "debugging",
+        "tags": [
+          "data-science",
+          "debugging",
+          "package-management",
+          "system"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 1000
+      },
+      "taxonomy": {
+        "domain": "debugging (Software Engineering \u2014 resolve a package-manager conflict in a multi-channel conda env)",
+        "capabilities": [
+          "error_recovery",
+          "shell_pipeline",
+          "exploration",
+          "long_horizon"
+        ]
+      },
+      "failure_modes": [
+        "pin_too_aggressively",
+        "ignores_solver_hints",
+        "installs_into_base_env"
+      ],
+      "diagnostic_note": "Conda's solver output is verbose \u2014 failure paired with other error_recovery tasks indicates the agent doesn't read long stderr. 1000s timeout gives room for multiple solver runs."
+    },
+    {
+      "id": "configure-git-webserver",
+      "one_liner": "Stand up a git server + webserver such that pushes to the repo publish files at a URL.",
+      "upstream": {
+        "category": "system-administration",
+        "tags": [
+          "system",
+          "version-control",
+          "web"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "system-administration (System Administration \u2014 multi-service config: ssh + git + http hook integration)",
+        "capabilities": [
+          "networking",
+          "git_workflow",
+          "shell_pipeline",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "ssh_keys_misconfigured",
+        "missing_post_receive_hook",
+        "webserver_doesnt_serve_correct_path"
+      ],
+      "diagnostic_note": "Composite task \u2014 agent must wire 3 services (sshd / git / nginx-or-equivalent). Failure paired with home-server-https and git-multibranch indicates multi-component orchestration weakness."
+    },
+    {
+      "id": "count-dataset-tokens",
+      "one_liner": "Count deepseek tokens in the 'science' split of OpenThoughts-114k using a specific tokenizer.",
+      "upstream": {
+        "category": "model-training",
+        "tags": [
+          "machine-learning",
+          "data",
+          "datasets",
+          "tokenization",
+          "huggingface"
+        ],
+        "difficulty": "easy",
+        "timeout_sec": 600
+      },
+      "taxonomy": {
+        "domain": "model-training (ML Workflow \u2014 load HF dataset + tokenizer, run aggregate)",
+        "capabilities": [
+          "language_python",
+          "ml_workflow",
+          "data_processing"
+        ]
+      },
+      "failure_modes": [
+        "wrong_split_filter",
+        "streaming_vs_full_mismatch",
+        "tokenizer_loaded_wrong"
+      ],
+      "diagnostic_note": "Trivial in theory. Failure usually means the agent grabbed the wrong domain filter or didn't stream a large dataset. Pair with hf-model-inference for HF familiarity signal."
+    },
+    {
+      "id": "crack-7z-hash",
+      "one_liner": "Extract a word from secrets.7z (encrypted) by recovering the password, write to /app/solution.txt.",
+      "upstream": {
+        "category": "security",
+        "tags": [
+          "decrypt",
+          "security",
+          "file-operations"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "security (Security & Forensics \u2014 password recovery against an encrypted 7z archive)",
+        "capabilities": [
+          "cryptography",
+          "shell_pipeline",
+          "self_verification",
+          "error_recovery"
+        ]
+      },
+      "failure_modes": [
+        "wrong_tool_choice (john vs hashcat vs 7z2john)",
+        "no_self_verification (claims password without actually opening archive)",
+        "exhausted_timeout_on_brute_force"
+      ],
+      "diagnostic_note": "Tests cryptographic-tool reach and self-verification. The 'right' path is 7z2john \u2192 john --wordlist; agents that go straight to brute force time out. Failure paired with other crypto/security tasks indicates weak tool reach; failure alone with success on similar password-recovery tasks indicates self-verification missing (it submitted a guess without opening the archive)."
+    },
+    {
+      "id": "create-bucket",
+      "one_liner": "Create a public-read S3 bucket named 'sample-bucket' via aws cli.",
+      "upstream": {
+        "category": "file-operations",
+        "tags": [
+          "cloud",
+          "storage",
+          "system"
+        ],
+        "difficulty": "easy",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "file-operations (System Administration \u2014 single aws cli invocation with correct ACL flag)",
+        "capabilities": [
+          "shell_pipeline",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "forgets_acl_flag",
+        "mis-types_bucket_name",
+        "doesnt_verify_with_get-bucket-acl"
+      ],
+      "diagnostic_note": "AWS cli smoke test. Failure suggests the agent didn't read the cli docs or didn't verify with a follow-up read."
+    },
+    {
+      "id": "cron-broken-network",
+      "one_liner": "Diagnose why /usr/bin/curl can't reach example.com under cron context and fix it.",
+      "upstream": {
+        "category": "system-administration",
+        "tags": [
+          "sys-admin",
+          "networking",
+          "troubleshooting"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "system-administration (System Administration \u2014 fix cron-context-specific network breakage)",
+        "capabilities": [
+          "networking",
+          "exploration",
+          "error_recovery",
+          "shell_pipeline"
+        ]
+      },
+      "failure_modes": [
+        "assumes_problem_is_dns_when_its_env_path",
+        "fixes_for_interactive_shell_only",
+        "doesnt_replicate_cron_env"
+      ],
+      "diagnostic_note": "Subtle: the problem is usually env / PATH / sudoers / iptables-cron, not the network itself. Pair with broken-networking \u2014 passing both is the cleanest sign of solid sys-admin reach."
+    },
+    {
+      "id": "cross-entropy-method",
+      "one_liner": "Implement three core methods in an RL cross-entropy optimization task so all unit tests pass.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "coding",
+          "reinforcement-learning",
+          "algorithm-implementation",
+          "optimization",
+          "unit-testing",
+          "caching"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 600
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Software Engineering \u2014 fill in stub methods to satisfy a pytest suite)",
+        "capabilities": [
+          "language_python",
+          "test_driven_loop",
+          "algorithms",
+          "ml_workflow",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "doesnt_run_tests",
+        "misimplements_elite_selection",
+        "cache_logic_breaks_repro"
+      ],
+      "diagnostic_note": "Canonical TDD task. Failure paired with attention-mil and organization-json-generator (other test_driven_loop tasks) indicates the agent isn't using the provided test feedback \u2014 usually the difference between 30% and 60% overall score."
+    },
+    {
+      "id": "csv-to-parquet",
+      "one_liner": "Convert /app/data.csv into /app/data.parquet preserving headers.",
+      "upstream": {
+        "category": "data-science",
+        "tags": [
+          "data-processing",
+          "file-operations"
+        ],
+        "difficulty": "easy",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "data-science (Data Processing & Extraction \u2014 one-shot pandas/pyarrow conversion)",
+        "capabilities": [
+          "language_python",
+          "data_processing",
+          "shell_pipeline"
+        ]
+      },
+      "failure_modes": [
+        "wrong_output_path",
+        "forgets_engine_arg",
+        "misses_dtype_inference"
+      ],
+      "diagnostic_note": "Trivial. Failure here paired with hello-world failure means environment/binary issue, not skill issue."
+    },
+    {
+      "id": "decommissioning-service-with-sensitive-data",
+      "one_liner": "Securely decommission a legacy service: shred sensitive files, remove config, kill process by PID file.",
+      "upstream": {
+        "category": "file-operations",
+        "tags": [
+          "coding",
+          "system",
+          "file-operations",
+          "encryption",
+          "shred",
+          "secure-deletion"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "file-operations (System Administration \u2014 secure shred + process cleanup with explicit ordering)",
+        "capabilities": [
+          "shell_pipeline",
+          "file_editing",
+          "self_verification",
+          "error_recovery"
+        ]
+      },
+      "failure_modes": [
+        "rm_instead_of_shred",
+        "kills_wrong_pid",
+        "forgets_to_remove_config"
+      ],
+      "diagnostic_note": "Tests careful ordering (read PID \u2192 kill \u2192 shred \u2192 cleanup) and tool selection (shred vs rm). Failure suggests the agent didn't follow the explicit checklist."
+    },
+    {
+      "id": "download-youtube",
+      "one_liner": "Download the first YouTube upload as mp4, trim to final 10s, save as result.mp4.",
+      "upstream": {
+        "category": "file-operations",
+        "tags": [
+          "file-operations",
+          "web"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "file-operations (Data Processing & Extraction \u2014 yt-dlp + ffmpeg trim chain)",
+        "capabilities": [
+          "shell_pipeline",
+          "networking",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_video_id",
+        "off_by_one_in_trim",
+        "saves_in_wrong_format"
+      ],
+      "diagnostic_note": "Standard yt-dlp + ffmpeg. Failure paired with extract-moves-from-video means the agent doesn't know either tool's CLI."
+    },
+    {
+      "id": "eval-mteb",
+      "one_liner": "Evaluate an embedding model on STS12 with mteb such that cosine_spearman > 0.7, save results file in the canonical layout.",
+      "upstream": {
+        "category": "data-science",
+        "tags": [
+          "data-processing",
+          "data-science"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 1800
+      },
+      "taxonomy": {
+        "domain": "data-science (ML Workflow \u2014 run a benchmark harness end-to-end and produce a result artifact in a specific path)",
+        "capabilities": [
+          "ml_workflow",
+          "language_python",
+          "long_horizon",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_results_dir_layout",
+        "picks_a_too-weak_model",
+        "mteb_API_mismatch"
+      ],
+      "diagnostic_note": "Tests reading library docs (mteb) AND producing an artifact at the exact required path. Failure paired with mlflow-register / hf-model-inference indicates HF/ML ecosystem unfamiliarity."
+    },
+    {
+      "id": "extract-elf",
+      "one_liner": "Write extract.js that reads a compiled C binary and outputs memory address \u2192 value as JSON.",
+      "upstream": {
+        "category": "file_operations",
+        "tags": [],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "file_operations (Security & Forensics \u2014 parse the ELF format from JavaScript to extract data sections)",
+        "capabilities": [
+          "language_other",
+          "reverse_engineering",
+          "file_editing",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "misreads_elf_section_headers",
+        "wrong_endianness",
+        "forgets_node_buffer_API"
+      ],
+      "diagnostic_note": "JS-from-binary task. Failure paired with make-doom-for-mips, run-pdp11-code indicates weak binary-format reasoning. The upstream typo 'file_operations' is preserved verbatim."
+    },
+    {
+      "id": "extract-moves-from-video",
+      "one_liner": "Download a YouTube video, transcribe Zork-style commands the player typed, write one per line.",
+      "upstream": {
+        "category": "file-operations",
+        "tags": [
+          "file-operations",
+          "web",
+          "video-processing"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "file-operations (Data Processing & Extraction \u2014 combine yt-dlp + OCR/ASR to extract structured text from video)",
+        "capabilities": [
+          "shell_pipeline",
+          "ml_workflow",
+          "networking",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "OCR_picks_HUD_text_not_commands",
+        "mishandles_continuous_video",
+        "wrong_output_format"
+      ],
+      "diagnostic_note": "Multi-modal extraction. The 360s budget is tight \u2014 agent must pick fast OCR. Failure paired with chess-best-move indicates vision-pipeline gap."
+    },
+    {
+      "id": "extract-safely",
+      "one_liner": "Extract the contents of archive.tar and write to /app/solution.txt.",
+      "upstream": {
+        "category": "security",
+        "tags": [
+          "file-operations",
+          "system"
+        ],
+        "difficulty": "easy",
+        "timeout_sec": 300
+      },
+      "taxonomy": {
+        "domain": "security (Security & Forensics \u2014 tar extraction with path-traversal awareness)",
+        "capabilities": [
+          "shell_pipeline",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "extracts_without_safety_check",
+        "writes_to_wrong_path",
+        "accepts_malicious_tar_paths"
+      ],
+      "diagnostic_note": "Sounds trivial but archive may contain path-traversal entries. Failure indicates the agent doesn't think defensively about archives."
+    },
+    {
+      "id": "feal-differential-cryptanalysis",
+      "one_liner": "Implement a chosen-plaintext differential-cryptanalysis attack on a toy FEAL-like cipher in Python.",
+      "upstream": {
+        "category": "mathematics",
+        "tags": [
+          "software-engineering"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 1800
+      },
+      "taxonomy": {
+        "domain": "mathematics (Security & Forensics \u2014 cryptanalysis exercise requiring algorithmic + math reasoning)",
+        "capabilities": [
+          "cryptography",
+          "algorithms",
+          "language_python",
+          "long_horizon"
+        ]
+      },
+      "failure_modes": [
+        "wrong_characteristic_choice",
+        "bit-counting_off",
+        "insufficient_plaintext_pairs"
+      ],
+      "diagnostic_note": "Niche skill. Failure paired with feal-linear-cryptanalysis indicates the agent doesn't know differential/linear cryptanalysis primitives; failure alone means the differential mechanics specifically went wrong."
+    },
+    {
+      "id": "feal-linear-cryptanalysis",
+      "one_liner": "Recover FEAL-like cipher keys from given plaintext-ciphertext pairs via linear cryptanalysis in C.",
+      "upstream": {
+        "category": "mathematics",
+        "tags": [
+          "software-engineering"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 1800
+      },
+      "taxonomy": {
+        "domain": "mathematics (Security & Forensics \u2014 linear cryptanalysis exercise in C)",
+        "capabilities": [
+          "cryptography",
+          "algorithms",
+          "language_c_cpp",
+          "long_horizon"
+        ]
+      },
+      "failure_modes": [
+        "wrong_linear_approximation",
+        "bit_indexing_wrong",
+        "brute_force_falls_back_to_random_search"
+      ],
+      "diagnostic_note": "Cryptanalysis in C \u2014 combines two niche skills. Failure paired with other language_c_cpp tasks indicates C gap; failure paired with feal-differential indicates cryptanalysis gap."
+    },
+    {
+      "id": "fibonacci-server",
+      "one_liner": "Run an HTTP server on port 3000 with /fib?n=N returning the nth Fibonacci as JSON.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "coding",
+          "networking",
+          "web"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Software Engineering \u2014 small HTTP server with one endpoint and a process supervisor)",
+        "capabilities": [
+          "language_python",
+          "networking",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "server_exits_immediately",
+        "no_query_param_handling",
+        "wrong_JSON_key"
+      ],
+      "diagnostic_note": "Tests minimal-server fluency + backgrounding. Failure indicates the agent forgot to detach the server (it dies when the agent exits) or didn't curl it before declaring done."
+    },
+    {
+      "id": "fix-git",
+      "one_liner": "Recover changes the user made on a branch that's gone missing and merge them into master.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "coding",
+          "version-control"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Software Engineering \u2014 git recovery via reflog / stash / orphan branches)",
+        "capabilities": [
+          "git_workflow",
+          "exploration",
+          "error_recovery",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "misses_reflog",
+        "force-resets_master_destructively",
+        "commits_wrong_subset_of_changes"
+      ],
+      "diagnostic_note": "Classic recovery exercise. Failure paired with git-multibranch and sanitize-git-repo indicates weak git-internals knowledge; failure alone usually means the agent didn't check reflog."
+    },
+    {
+      "id": "fix-pandas-version",
+      "one_liner": "Diagnose a failing pandas-based test suite and fix the version-compat bug so tests pass.",
+      "upstream": {
+        "category": "debugging",
+        "tags": [
+          "coding",
+          "data-processing",
+          "debugging"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "debugging (Software Engineering \u2014 diagnose-and-patch a real Python regression)",
+        "capabilities": [
+          "language_python",
+          "test_driven_loop",
+          "error_recovery",
+          "data_processing"
+        ]
+      },
+      "failure_modes": [
+        "misreads_traceback",
+        "pins_wrong_dependency_version",
+        "fixes_symptom_not_cause",
+        "doesnt_rerun_tests"
+      ],
+      "diagnostic_note": "Canonical 'read traceback \u2192 form hypothesis \u2192 run tests' loop. Failure here paired with other debugging tasks failing means the agent can't iterate on test feedback \u2014 usually the difference between a 30% and 60% overall score. Strong signal on test_driven_loop."
+    },
+    {
+      "id": "fix-permissions",
+      "one_liner": "Make process_data.sh runnable \u2014 find and fix the permission issue.",
+      "upstream": {
+        "category": "system-administration",
+        "tags": [
+          "file-operations",
+          "system"
+        ],
+        "difficulty": "easy",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "system-administration (System Administration \u2014 chmod / shebang / interpreter-permission triage)",
+        "capabilities": [
+          "shell_pipeline",
+          "exploration",
+          "error_recovery"
+        ]
+      },
+      "failure_modes": [
+        "chmod_only_the_wrapper",
+        "misses_interpreter_permission",
+        "applies_777_indiscriminately"
+      ],
+      "diagnostic_note": "Easy task \u2014 failure usually means the agent didn't run the script first to see the actual error message."
+    },
+    {
+      "id": "form-filling",
+      "one_liner": "Build a small RAG tool that fills PDF forms by retrieving info from text docs.",
+      "upstream": {
+        "category": "personal-assistant",
+        "tags": [
+          "text-processing",
+          "pdf-manipulation",
+          "information-retrieval",
+          "python",
+          "cli"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 300
+      },
+      "taxonomy": {
+        "domain": "personal-assistant (Software Engineering \u2014 small RAG CLI with PDF write-back)",
+        "capabilities": [
+          "language_python",
+          "ml_workflow",
+          "file_editing",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "doesnt_index_input_docs",
+        "PDF_field_mapping_wrong",
+        "saves_to_wrong_path"
+      ],
+      "diagnostic_note": "Tight 300s timeout for a multi-component task. Failure here paired with other RAG-flavored tasks indicates the agent over-engineers; failure alone usually means PDF library reach gap (pypdf vs pdfplumber)."
+    },
+    {
+      "id": "get-bitcoin-nodes",
+      "one_liner": "Run a local service that connects to the Bitcoin network and exposes blockchain endpoints.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "api",
+          "coding",
+          "data-processing"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Software Engineering \u2014 multi-endpoint Flask service against an external network)",
+        "capabilities": [
+          "language_python",
+          "networking",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "network_timeout_no_retry",
+        "wrong_API_for_library_version",
+        "server_doesnt_stay_up"
+      ],
+      "diagnostic_note": "Tests network library reach (bitcoinlib) plus minimal service. Failure paired with fibonacci-server / solana-data indicates Flask-service unfamiliarity."
+    },
+    {
+      "id": "git-multibranch",
+      "one_liner": "Set up a git server with two branches deployed to two distinct HTTPS endpoints.",
+      "upstream": {
+        "category": "system-administration",
+        "tags": [
+          "system",
+          "version-control",
+          "web"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 480
+      },
+      "taxonomy": {
+        "domain": "system-administration (System Administration \u2014 ssh + git + dual webserver routes wired together)",
+        "capabilities": [
+          "git_workflow",
+          "networking",
+          "shell_pipeline",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "post-receive_only_deploys_one_branch",
+        "forgets_https_cert",
+        "ssh_auth_misconfigured"
+      ],
+      "diagnostic_note": "Composite: git internals + nginx/apache config + ssh. Failure paired with configure-git-webserver indicates the agent can't compose service configs."
+    },
+    {
+      "id": "git-workflow-hack",
+      "one_liner": "Turn a CV repo into a personal website project using a clean professional template.",
+      "upstream": {
+        "category": "security",
+        "tags": [
+          "security",
+          "file-operations",
+          "package-management"
+        ],
+        "difficulty": "easy",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "security (Software Engineering \u2014 repo restructuring task tagged 'security' but functionally a transform-and-commit task)",
+        "capabilities": [
+          "git_workflow",
+          "file_editing",
+          "shell_pipeline"
+        ]
+      },
+      "failure_modes": [
+        "forgets_to_commit",
+        "loses_original_info_md",
+        "picks_wrong_static_generator"
+      ],
+      "diagnostic_note": "Despite the 'security' tag, this is mostly content transformation. The 'security' angle is workflow hygiene (no secrets pushed). Failure indicates poor commit discipline."
+    },
+    {
+      "id": "gpt2-codegolf",
+      "one_liner": "Write a dependency-free C file that does argmax sampling from a GPT-2 .ckpt under a size limit.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [],
+        "difficulty": "hard",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Software Engineering \u2014 implement transformer inference in pure C from weights)",
+        "capabilities": [
+          "language_c_cpp",
+          "ml_workflow",
+          "build_compile",
+          "algorithms",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "incorrect_tensor_layout (TF ckpt format)",
+        "off_by_one_in_attention",
+        "no_self_verification (submits without sampling check)",
+        "exceeds_size_budget"
+      ],
+      "diagnostic_note": "Dual-axis test: C-language fluency AND ML-from-first-principles. Failure paired with other language_c_cpp tasks indicates a C familiarity gap; failure paired with other ml_workflow tasks indicates ML internals weakness. Failing both with passes on similar Python ML tasks is the cleanest signal that the model is Python-anchored."
+    },
+    {
+      "id": "grid-pattern-transform",
+      "one_liner": "Implement the solve() function transforming a 2x2 grid into a 6x6 grid per shown examples.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "python",
+          "coding",
+          "numpy",
+          "grid-manipulation",
+          "pattern-recognition"
+        ],
+        "difficulty": "easy",
+        "timeout_sec": 600
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Algorithmic / Computational \u2014 pattern-recognition from examples, ARC-style)",
+        "capabilities": [
+          "language_python",
+          "algorithms",
+          "test_driven_loop",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "overfits_to_one_example",
+        "wrong_grid_orientation",
+        "doesnt_run_the_provided_examples"
+      ],
+      "diagnostic_note": "ARC-flavored. Failure indicates weak inductive pattern reasoning; pair with blind-maze-explorer-algorithm for the algorithmic-reasoning signal."
+    },
+    {
+      "id": "hello-world",
+      "one_liner": "Create hello.txt containing the string 'Hello, world!'.",
+      "upstream": {
+        "category": "file-operations",
+        "tags": [
+          "file-operations"
+        ],
+        "difficulty": "easy",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "file-operations (System Administration \u2014 one-shot file write smoke test)",
+        "capabilities": [
+          "file_editing",
+          "shell_pipeline"
+        ]
+      },
+      "failure_modes": [
+        "cant_follow_basic_instruction",
+        "wrong_working_directory",
+        "binary_not_uploaded"
+      ],
+      "diagnostic_note": "Pure smoke. Failure here is catastrophic and almost never about model skill \u2014 suspect environment setup (agent binary not uploaded, wrong cwd, container mount issues). If this fails while complex tasks pass, audit the adapter, not the model."
+    },
+    {
+      "id": "heterogeneous-dates",
+      "one_liner": "Compute daily SF temperature delta from two CSVs with differently-formatted date columns.",
+      "upstream": {
+        "category": "file-operations",
+        "tags": [
+          "data-processing"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "file-operations (Data Processing & Extraction \u2014 date-parsing robustness across heterogeneous formats)",
+        "capabilities": [
+          "data_processing",
+          "language_python",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "assumes_one_date_format",
+        "drops_unparseable_rows_silently",
+        "wrong_join_key"
+      ],
+      "diagnostic_note": "Failure suggests the agent didn't inspect both CSVs before joining \u2014 a self_verification signal."
+    },
+    {
+      "id": "hf-model-inference",
+      "one_liner": "Run a local HF sentiment model and expose it as an inference endpoint.",
+      "upstream": {
+        "category": "data-science",
+        "tags": [
+          "api",
+          "coding",
+          "data-processing",
+          "data-science"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "data-science (ML Workflow \u2014 HF model + minimal API + cached weights)",
+        "capabilities": [
+          "language_python",
+          "ml_workflow",
+          "networking",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "forgets_to_cache_locally",
+        "downloads_at_request_time",
+        "wrong_pipeline_kwargs"
+      ],
+      "diagnostic_note": "Tests HF tooling + service basics. Failure paired with count-dataset-tokens and eval-mteb indicates weak HF ecosystem reach."
+    },
+    {
+      "id": "home-server-https",
+      "one_liner": "Stand up an HTTPS-accessible home server using DNS-based cert validation (port 80 blocked).",
+      "upstream": {
+        "category": "system-administration",
+        "tags": [
+          "networking",
+          "ssl-certificates",
+          "dns",
+          "web-server",
+          "system-administration"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "system-administration (System Administration \u2014 DNS-01 cert challenge instead of HTTP-01)",
+        "capabilities": [
+          "networking",
+          "shell_pipeline",
+          "cryptography",
+          "self_verification",
+          "long_horizon"
+        ]
+      },
+      "failure_modes": [
+        "picks_HTTP-01_anyway",
+        "wrong_DNS_provider_plugin",
+        "forgets_to_renew_DNS_record"
+      ],
+      "diagnostic_note": "Tests deep TLS-cert literacy (must choose DNS-01, not HTTP-01). Failure paired with openssl-selfsigned-cert indicates weak cert knowledge."
+    },
+    {
+      "id": "incompatible-python-fasttext",
+      "one_liner": "Make the fasttext python package work with the default python interpreter (currently broken).",
+      "upstream": {
+        "category": "debugging",
+        "tags": [
+          "package-management",
+          "troubleshooting"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 600
+      },
+      "taxonomy": {
+        "domain": "debugging (Software Engineering \u2014 fix a Python C-extension build/install mismatch)",
+        "capabilities": [
+          "error_recovery",
+          "build_compile",
+          "language_python",
+          "exploration"
+        ]
+      },
+      "failure_modes": [
+        "installs_wrong_wheel",
+        "ignores_setuptools_error",
+        "mixes_pip_and_distro_install"
+      ],
+      "diagnostic_note": "C-extension binding issue. Failure paired with broken-python and conda-env-conflict indicates poor Python build-toolchain reasoning."
+    },
+    {
+      "id": "intrusion-detection",
+      "one_liner": "Write two shell scripts: one to analyze logs for intrusion signals, one to respond.",
+      "upstream": {
+        "category": "system-administration",
+        "tags": [
+          "file-operations",
+          "system"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "system-administration (Security & Forensics \u2014 log-pattern detection scripts with action policies)",
+        "capabilities": [
+          "shell_pipeline",
+          "file_editing",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "regex_too_loose_or_strict",
+        "second_script_doesnt_consume_first_output",
+        "writes_to_wrong_path"
+      ],
+      "diagnostic_note": "Tests shell scripting hygiene + composition. Failure paired with regex-style tasks indicates poor pattern-matching reach."
+    },
+    {
+      "id": "jupyter-notebook-server",
+      "one_liner": "Install Jupyter, configure for any-IP + password auth + non-default port, run it.",
+      "upstream": {
+        "category": "data-science",
+        "tags": [
+          "data-processing",
+          "security",
+          "system",
+          "web"
+        ],
+        "difficulty": "easy",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "data-science (System Administration \u2014 Jupyter config file with auth hash + bind address)",
+        "capabilities": [
+          "shell_pipeline",
+          "networking",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "forgets_to_hash_password",
+        "binds_127.0.0.1_only",
+        "doesnt_persist_config"
+      ],
+      "diagnostic_note": "Service config + auth. Failure indicates incomplete reading of jupyter docs."
+    },
+    {
+      "id": "kv-store-grpc",
+      "one_liner": "Build a gRPC KV store server in Python backed by a dict; integers per key.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "coding",
+          "file-operations",
+          "system"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Software Engineering \u2014 Protocol Buffers definition + grpc-python server with persistence)",
+        "capabilities": [
+          "language_python",
+          "networking",
+          "self_verification",
+          "build_compile"
+        ]
+      },
+      "failure_modes": [
+        "forgets_protoc_step",
+        "wrong_proto_field_numbers",
+        "server_doesnt_implement_all_RPC"
+      ],
+      "diagnostic_note": "Tests gRPC ecosystem fluency. Failure paired with fibonacci-server indicates basic-server miss; failure alone with REST tasks passing means gRPC tooling reach gap."
+    },
+    {
+      "id": "make-doom-for-mips",
+      "one_liner": "Compile DOOM for MIPS such that vm.js can run it and render frames.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "software-engineering"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Software Engineering \u2014 cross-compile a real codebase for a non-host ISA)",
+        "capabilities": [
+          "language_c_cpp",
+          "build_compile",
+          "language_other",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "uses_host_gcc_not_mips",
+        "missing_libc_for_mips",
+        "linker_flag_mismatch_with_vm"
+      ],
+      "diagnostic_note": "Cross-compilation expertise. Failure paired with make-mips-interpreter indicates the agent doesn't know what a MIPS toolchain is."
+    },
+    {
+      "id": "make-mips-interpreter",
+      "one_liner": "Write a MIPS interpreter in JS (vm.js) capable of running an ELF compiled from doomgeneric.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "software-engineering"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Software Engineering \u2014 write a small ISA emulator in JS with syscall handling)",
+        "capabilities": [
+          "language_other",
+          "algorithms",
+          "reverse_engineering",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_endianness",
+        "incomplete_syscall_table",
+        "off_by_one_in_branch_decoding"
+      ],
+      "diagnostic_note": "Niche skill \u2014 ISA emulators. Failure expected for most models; passing this is a strong positive signal."
+    },
+    {
+      "id": "mlflow-register",
+      "one_liner": "Run a local mlflow server on :8080, train a tiny sklearn model, register it as 'gpt-5'.",
+      "upstream": {
+        "category": "data-science",
+        "tags": [
+          "modeling",
+          "dev-tools"
+        ],
+        "difficulty": "easy",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "data-science (ML Workflow \u2014 mlflow tracking + registry CRUD)",
+        "capabilities": [
+          "language_python",
+          "ml_workflow",
+          "networking",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "server_not_backgrounded",
+        "registers_with_wrong_name",
+        "forgets_to_log_model_artifact"
+      ],
+      "diagnostic_note": "Smoke for mlflow ecosystem. Failure suggests the agent doesn't know mlflow's CLI/API patterns."
+    },
+    {
+      "id": "modernize-fortran-build",
+      "one_liner": "Update a Fortran project's Makefile to build with gfortran.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "compiler-migration",
+          "build-automation",
+          "fortran"
+        ],
+        "difficulty": "easy",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Software Engineering \u2014 port Makefile from old compiler flags to gfortran)",
+        "capabilities": [
+          "language_other",
+          "build_compile",
+          "file_editing"
+        ]
+      },
+      "failure_modes": [
+        "wrong_flag_translation",
+        "misses_F90_vs_F77_mode",
+        "keeps_old_compiler_var"
+      ],
+      "diagnostic_note": "Tests Makefile + gfortran familiarity. Failure paired with cobol-modernization indicates legacy-language gap."
+    },
+    {
+      "id": "new-encrypt-command",
+      "one_liner": "Encrypt all files in data/ using rencrypt with the strongest option; output structured into encrypted_data/.",
+      "upstream": {
+        "category": "security",
+        "tags": [
+          "file-operations",
+          "security"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "security (Security & Forensics \u2014 bulk encryption via a specific CLI with strongest-option selection)",
+        "capabilities": [
+          "cryptography",
+          "shell_pipeline",
+          "file_editing",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "picks_weaker_algorithm",
+        "wrong_output_dir_layout",
+        "forgets_per-file_naming_convention"
+      ],
+      "diagnostic_note": "Reading a specific tool's help thoroughly. Failure indicates lazy doc-reading."
+    },
+    {
+      "id": "nginx-request-logging",
+      "one_liner": "Install Nginx, listen on :8080, serve /var/www/html, custom verbose request logging.",
+      "upstream": {
+        "category": "system-administration",
+        "tags": [
+          "web-server"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "system-administration (System Administration \u2014 nginx server config + custom log_format)",
+        "capabilities": [
+          "networking",
+          "file_editing",
+          "shell_pipeline",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "log_format_directive_in_wrong_block",
+        "forgets_to_reload",
+        "wrong_root_path"
+      ],
+      "diagnostic_note": "Tests nginx-config literacy. Standard sysadmin task."
+    },
+    {
+      "id": "oom",
+      "one_liner": "Cache HF albert-base-v2 model+tokenizer in the default cache so .from_pretrained() works offline.",
+      "upstream": {
+        "category": "data-science",
+        "tags": [
+          "coding",
+          "data-processing",
+          "data-science"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "data-science (ML Workflow \u2014 HF cache pre-population without OOM in 360s)",
+        "capabilities": [
+          "ml_workflow",
+          "language_python",
+          "error_recovery"
+        ]
+      },
+      "failure_modes": [
+        "downloads_into_wrong_cache",
+        "OOMs_on_eager_load",
+        "forgets_tokenizer"
+      ],
+      "diagnostic_note": "Tagged 'hard' because the trick is to not load to RAM \u2014 just populate the cache via snapshot_download or similar. Failure indicates the agent did the naive thing and OOM'd."
+    },
+    {
+      "id": "openssl-selfsigned-cert",
+      "one_liner": "Generate a 2048-bit self-signed cert with specific SAN/CN/expiry, store in /app/ssl/.",
+      "upstream": {
+        "category": "security",
+        "tags": [
+          "coding",
+          "file-operations",
+          "security",
+          "system"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "security (Security & Forensics \u2014 openssl req with config-file + SAN extensions)",
+        "capabilities": [
+          "cryptography",
+          "shell_pipeline",
+          "file_editing",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "missing_SAN",
+        "wrong_key_size",
+        "forgets_x509v3_extensions"
+      ],
+      "diagnostic_note": "Tests openssl CLI literacy (which is famously thorny). Failure paired with home-server-https indicates cert-knowledge gap."
+    },
+    {
+      "id": "organization-json-generator",
+      "one_liner": "Transform three CSVs into a nested JSON matching schema.json.",
+      "upstream": {
+        "category": "file-operations",
+        "tags": [
+          "file-operations"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "file-operations (Data Processing & Extraction \u2014 multi-table CSV \u2192 nested JSON join with schema validation)",
+        "capabilities": [
+          "language_python",
+          "data_processing",
+          "test_driven_loop",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_join_direction",
+        "misreads_schema",
+        "fails_to_validate_output_against_schema"
+      ],
+      "diagnostic_note": "Tests careful schema reading. Failure clusters with other data_processing tasks indicates the agent doesn't validate output structure."
+    },
+    {
+      "id": "parallel-particle-simulator",
+      "one_liner": "Implement serial, MPI, and OpenMP versions of a 2D particle simulator and benchmark them.",
+      "upstream": {
+        "category": "scientific-computing",
+        "tags": [
+          "parallel",
+          "programming-memory",
+          "models-particle",
+          "simulator"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "scientific-computing (Scientific Computing \u2014 three-way parallel implementation with benchmark comparison)",
+        "capabilities": [
+          "language_c_cpp",
+          "algorithms",
+          "build_compile",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "MPI_collective_misused",
+        "OpenMP_race_in_writes",
+        "one_implementation_wrong"
+      ],
+      "diagnostic_note": "Multi-implementation parallel programming. Failure paired with parallelize-graph indicates parallel-programming gap."
+    },
+    {
+      "id": "parallelize-graph",
+      "one_liner": "Parallelize a serial de Bruijn graph algorithm in UPC for genome assembly.",
+      "upstream": {
+        "category": "scientific-computing",
+        "tags": [
+          "parallel-computing",
+          "upc",
+          "graph-algorithms",
+          "genome-assembly",
+          "de-bruijn-graphs"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 1800
+      },
+      "taxonomy": {
+        "domain": "scientific-computing (Scientific Computing \u2014 UPC parallelization of a graph algorithm with output-equivalence)",
+        "capabilities": [
+          "language_other",
+          "algorithms",
+          "long_horizon",
+          "self_verification",
+          "build_compile"
+        ]
+      },
+      "failure_modes": [
+        "wrong_UPC_threading_model",
+        "loses_contig_correctness",
+        "performance_regression"
+      ],
+      "diagnostic_note": "Niche language (UPC). Failure expected unless the model has read UPC-specific material; passing is a strong positive."
+    },
+    {
+      "id": "password-recovery",
+      "one_liner": "Recover an accidentally-deleted file (launchcode.txt) somewhere in /app via forensics.",
+      "upstream": {
+        "category": "security",
+        "tags": [
+          "system",
+          "file-operations",
+          "troubleshooting"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "security (Security & Forensics \u2014 file recovery via filesystem forensic tools or remnant bytes)",
+        "capabilities": [
+          "reverse_engineering",
+          "shell_pipeline",
+          "exploration",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "misses_unlinked_inode",
+        "picks_wrong_recovery_tool",
+        "greps_only_for_text_not_binary_signature"
+      ],
+      "diagnostic_note": "Forensics \u2014 failure paired with recover-obfuscated-files indicates weak forensic-tool reach."
+    },
+    {
+      "id": "path-tracing-reverse",
+      "one_liner": "Write mystery.c that reproduces the behavior of a compiled binary by black-box / decompilation.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "images"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 600
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Software Engineering \u2014 reverse-engineer a binary to reproduce its rendering)",
+        "capabilities": [
+          "language_c_cpp",
+          "reverse_engineering",
+          "self_verification",
+          "build_compile"
+        ]
+      },
+      "failure_modes": [
+        "only_matches_one_input",
+        "misreads_decompiled_floats",
+        "outputs_different_format"
+      ],
+      "diagnostic_note": "Heavy on RE patience. Failure paired with extract-elf and make-mips-interpreter indicates reverse-engineering gap."
+    },
+    {
+      "id": "path-tracing",
+      "one_liner": "Write a C program that reproduces a given rendered image.ppm as closely as possible.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "images"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 600
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Software Engineering \u2014 graphics-from-scratch path tracer in C with output-image similarity scoring)",
+        "capabilities": [
+          "language_c_cpp",
+          "algorithms",
+          "build_compile",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_ppm_format_header",
+        "gamma_or_tone-mapping_off",
+        "insufficient_samples_per_pixel"
+      ],
+      "diagnostic_note": "Tests graphics literacy + C. Failure paired with path-tracing-reverse indicates the agent doesn't have a path-tracer model in head."
+    },
+    {
+      "id": "play-zork",
+      "one_liner": "Play Zork to completion (maximum score) and write the ending message to /app/answer.txt.",
+      "upstream": {
+        "category": "games",
+        "tags": [
+          "games",
+          "long-context",
+          "interactive",
+          "shortcut-solution"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 2000
+      },
+      "taxonomy": {
+        "domain": "games (Long-horizon Interaction \u2014 interactive fiction over many turns with no shortcut other than 'shortcut-solution' hint)",
+        "capabilities": [
+          "long_horizon",
+          "language_python",
+          "self_verification",
+          "exploration"
+        ]
+      },
+      "failure_modes": [
+        "loses_state_in_long_session",
+        "gets_stuck_in_loop",
+        "misses_shortcut_solution_path"
+      ],
+      "diagnostic_note": "Strong long_horizon signal \u2014 2000s timeout, dozens of turns. Failure is highly diagnostic of context-management. The 'shortcut-solution' tag hints there's a published shortcut; agents that don't find it via web/search likely time out."
+    },
+    {
+      "id": "polyglot-c-py",
+      "one_liner": "Write one file that is valid Python AND valid C, both printing Fibonacci(N).",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "coding"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Software Engineering \u2014 polyglot file: both python3 and gcc must accept it)",
+        "capabilities": [
+          "language_python",
+          "language_c_cpp",
+          "algorithms",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "comment_syntax_doesnt_overlap",
+        "one_compiler_rejects",
+        "wrong_Fibonacci_indexing"
+      ],
+      "diagnostic_note": "Niche puzzle. Polyglot tricks are well-known but not common knowledge."
+    },
+    {
+      "id": "polyglot-rust-c",
+      "one_liner": "Write one file that is valid Rust AND valid C, both printing Fibonacci(N).",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "coding",
+          "no-verified-solution"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Software Engineering \u2014 polyglot file: both rustc and gcc must accept it; harder than python+C)",
+        "capabilities": [
+          "language_other",
+          "language_c_cpp",
+          "algorithms",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "syntax_overlap_impossible_without_macros",
+        "fn_signature_clashes",
+        "wrong_Fibonacci_indexing"
+      ],
+      "diagnostic_note": "Marked 'no-verified-solution' \u2014 extremely hard. Strong positive signal if passed."
+    },
+    {
+      "id": "processing-pipeline",
+      "one_liner": "Diagnose and fix shell script issues so a multi-step data pipeline runs successfully.",
+      "upstream": {
+        "category": "system-administration",
+        "tags": [
+          "file-operations",
+          "system"
+        ],
+        "difficulty": "easy",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "system-administration (System Administration \u2014 fix shell-script bugs across a chain of scripts)",
+        "capabilities": [
+          "shell_pipeline",
+          "exploration",
+          "error_recovery",
+          "file_editing"
+        ]
+      },
+      "failure_modes": [
+        "fixes_only_first_script",
+        "doesnt_rerun_pipeline",
+        "misses_quoting_issues"
+      ],
+      "diagnostic_note": "Easy sysadmin debug. Failure indicates the agent didn't iterate over each script's error."
+    },
+    {
+      "id": "prove-plus-comm",
+      "one_liner": "Complete a Coq proof that natural-number addition is commutative.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "coding"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Algorithmic / Computational \u2014 interactive theorem proving in Coq)",
+        "capabilities": [
+          "language_other",
+          "algorithms",
+          "test_driven_loop",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_induction_variable",
+        "unfolds_too_aggressively",
+        "forgets_to_close_Qed"
+      ],
+      "diagnostic_note": "Niche skill (Coq). Failure expected for most models; passing is a strong positive signal."
+    },
+    {
+      "id": "pytorch-model-cli",
+      "one_liner": "Build a CLI that loads weights.json and image.png, runs MNIST inference, prints predicted digit.",
+      "upstream": {
+        "category": "model-training",
+        "tags": [
+          "coding",
+          "C",
+          "pytorch"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "model-training (ML Workflow \u2014 minimal MNIST inference CLI; tagged C but commonly solved in Python)",
+        "capabilities": [
+          "language_python",
+          "ml_workflow",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_weight_layout",
+        "preprocessing_mismatch",
+        "prints_extra_text"
+      ],
+      "diagnostic_note": "Tests inference plumbing. Failure usually means the agent mishandled preprocessing (normalization / channel order)."
+    },
+    {
+      "id": "pytorch-model-recovery",
+      "one_liner": "Reconstruct a pytorch model architecture from a state_dict and re-train+evaluate from a dataset.",
+      "upstream": {
+        "category": "model-training",
+        "tags": [
+          "coding",
+          "pytorch",
+          "machine-learning"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "model-training (ML Workflow \u2014 infer architecture from weight shapes, then train)",
+        "capabilities": [
+          "language_python",
+          "ml_workflow",
+          "algorithms",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_layer_dims",
+        "misorders_conv_vs_linear",
+        "forgets_activation"
+      ],
+      "diagnostic_note": "Tests weight-shape inspection skills. Failure indicates the agent didn't print state_dict before guessing the arch."
+    },
+    {
+      "id": "qemu-alpine-ssh",
+      "one_liner": "Boot alpine.iso in qemu, start an sshd inside, expose on host port 2222 with password auth.",
+      "upstream": {
+        "category": "system-administration",
+        "tags": [
+          "sys-admin"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 600
+      },
+      "taxonomy": {
+        "domain": "system-administration (System Administration \u2014 qemu boot + in-guest service setup + port forward)",
+        "capabilities": [
+          "container_ops",
+          "networking",
+          "shell_pipeline",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "forgets_-net_user,hostfwd",
+        "sshd_not_persisted",
+        "wrong_password_in_guest"
+      ],
+      "diagnostic_note": "Composite qemu + ssh. Failure paired with qemu-startup indicates qemu unfamiliarity."
+    },
+    {
+      "id": "qemu-startup",
+      "one_liner": "Start alpine.iso in qemu so a host telnet to 127.0.0.1:6665 reaches the login prompt.",
+      "upstream": {
+        "category": "system-administration",
+        "tags": [
+          "sys-admin"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 600
+      },
+      "taxonomy": {
+        "domain": "system-administration (System Administration \u2014 qemu with serial-over-telnet + backgrounding)",
+        "capabilities": [
+          "container_ops",
+          "networking",
+          "shell_pipeline"
+        ]
+      },
+      "failure_modes": [
+        "uses_-monitor_instead_of_-serial",
+        "forgets_to_background",
+        "wrong_telnet_port"
+      ],
+      "diagnostic_note": "Tests qemu's monitor/serial flag literacy. Easier sibling of qemu-alpine-ssh."
+    },
+    {
+      "id": "raman-fitting",
+      "one_liner": "Fit G and 2D peaks of a Raman spectrum (Lorentzian), output parameters to results.json.",
+      "upstream": {
+        "category": "scientific-computing",
+        "tags": [
+          "coding",
+          "fitting",
+          "analysis",
+          "physics"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "scientific-computing (Scientific Computing \u2014 peak-fit with scipy.optimize.curve_fit and physics-aware initial guesses)",
+        "capabilities": [
+          "language_python",
+          "data_processing",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "bad_initial_guesses",
+        "fit_doesnt_converge",
+        "wrong_output_keys"
+      ],
+      "diagnostic_note": "Physics literacy + scipy fluency. Failure paired with chem-property-targeting indicates scientific-Python ecosystem gap."
+    },
+    {
+      "id": "recover-obfuscated-files",
+      "one_liner": "De-obfuscate base64-encoded filenames and contents back to original files under /app/sensitive_data/.",
+      "upstream": {
+        "category": "security",
+        "tags": [
+          "file-recovery",
+          "base64",
+          "forensics",
+          "string-manipulation"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "security (Security & Forensics \u2014 bulk base64 decode + filename round-trip with idempotence)",
+        "capabilities": [
+          "shell_pipeline",
+          "reverse_engineering",
+          "file_editing",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "misreads_suffix_boundary",
+        "loses_originals",
+        "decodes_only_filename_not_content"
+      ],
+      "diagnostic_note": "Tests careful spec-following. Failure paired with extract-safely indicates archive/file safety gaps."
+    },
+    {
+      "id": "reshard-c4-data",
+      "one_liner": "Reshard c4_sample/ into c4_reshard/ with \u226430 entries per directory and a max file size.",
+      "upstream": {
+        "category": "data-science",
+        "tags": [
+          "coding",
+          "data-processing",
+          "file-operations"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "data-science (Data Processing & Extraction \u2014 recursive directory rebalancing with size + count constraints)",
+        "capabilities": [
+          "data_processing",
+          "language_python",
+          "shell_pipeline",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "violates_count_constraint",
+        "wrong_split_strategy",
+        "loses_file_content"
+      ],
+      "diagnostic_note": "Tests careful constraint-satisfaction. Failure suggests the agent didn't verify the constraints after writing."
+    },
+    {
+      "id": "run-pdp11-code",
+      "one_liner": "Identify a binary from a hex dump, figure out how to run it (PDP-11 era), report output.",
+      "upstream": {
+        "category": "security",
+        "tags": [
+          "file-operations",
+          "forensics",
+          "system"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 1000
+      },
+      "taxonomy": {
+        "domain": "security (Security & Forensics \u2014 identify ancient binary format and emulate it)",
+        "capabilities": [
+          "reverse_engineering",
+          "exploration",
+          "container_ops",
+          "long_horizon"
+        ]
+      },
+      "failure_modes": [
+        "misidentifies_file_format",
+        "tries_to_run_natively",
+        "gives_up_after_first_dead_end"
+      ],
+      "diagnostic_note": "Heavy on tool-discovery. Failure expected for most models \u2014 passing implies the agent both identified PDP-11 binary AND found an emulator."
+    },
+    {
+      "id": "sanitize-git-repo",
+      "one_liner": "Find all API keys in repo history and replace with placeholders without breaking the project.",
+      "upstream": {
+        "category": "security",
+        "tags": [
+          "security",
+          "system",
+          "version-control"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "security (Security & Forensics \u2014 secret scanning + git history rewrite with placeholder substitution)",
+        "capabilities": [
+          "git_workflow",
+          "exploration",
+          "shell_pipeline",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "misses_keys_in_history",
+        "breaks_project_imports",
+        "force-pushes_destructively"
+      ],
+      "diagnostic_note": "Tests git-filter-repo / BFG familiarity. Pair with fix-git and git-multibranch for the git-workflow signal."
+    },
+    {
+      "id": "security-vulhub-minio",
+      "one_liner": "Extract MinIO credentials from a node's env vars and write to /app/result.txt.",
+      "upstream": {
+        "category": "security",
+        "tags": [
+          "file-operations",
+          "system",
+          "security"
+        ],
+        "difficulty": "easy",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "security (Security & Forensics \u2014 read env vars from a remote node and write to file)",
+        "capabilities": [
+          "shell_pipeline",
+          "networking",
+          "exploration"
+        ]
+      },
+      "failure_modes": [
+        "wrong_env_var_name",
+        "reads_local_not_node1",
+        "forgets_output_path"
+      ],
+      "diagnostic_note": "Easy task \u2014 failure points to weak remote-host reasoning."
+    },
+    {
+      "id": "simple-sheets-put",
+      "one_liner": "Create a Google Sheets-like 'Financial Report' workbook with structured Q1 Data sheet.",
+      "upstream": {
+        "category": "file-operations",
+        "tags": [
+          "api",
+          "data-processing"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "file-operations (Data Processing & Extraction \u2014 Sheets API CRUD or local xlsx write with structure)",
+        "capabilities": [
+          "language_python",
+          "data_processing",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_cell_address",
+        "leaves_blank_sheet",
+        "API_auth_misconfigured"
+      ],
+      "diagnostic_note": "Tests Sheets-flavored API/xlsx fluency. Failure indicates the agent didn't verify the output."
+    },
+    {
+      "id": "simple-web-scraper",
+      "one_liner": "Scrape book info from a local bookstore server using requests+bs4, output structured.",
+      "upstream": {
+        "category": "data-science",
+        "tags": [
+          "web-scraping",
+          "data-extraction"
+        ],
+        "difficulty": "easy",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "data-science (Data Processing & Extraction \u2014 straightforward bs4 traversal)",
+        "capabilities": [
+          "language_python",
+          "networking",
+          "data_processing",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_HTML_selector",
+        "handles_only_first_page",
+        "fails_on_special_chars"
+      ],
+      "diagnostic_note": "Smoke for scraping. Failure usually means the agent didn't print a sample of the HTML before parsing."
+    },
+    {
+      "id": "solana-data",
+      "one_liner": "Run a local server connecting to Solana, exposing JSON endpoints for accounts/transactions/status.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "api",
+          "coding",
+          "data-processing"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Software Engineering \u2014 multi-endpoint service against an external RPC)",
+        "capabilities": [
+          "language_python",
+          "networking",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "RPC_endpoint_misconfigured",
+        "forgets_error_JSON_format",
+        "server_doesnt_stay_up"
+      ],
+      "diagnostic_note": "Sibling of get-bitcoin-nodes. Strong shared signal on networking + service basics."
+    },
+    {
+      "id": "solve-maze-challenge",
+      "one_liner": "Implement a treasure-troll brain that finds gold on a stacked-block map by stacking blocks to reach height 8.",
+      "upstream": {
+        "category": "algorithms",
+        "tags": [
+          "algorithms",
+          "pathfinding",
+          "game-ai",
+          "javascript",
+          "problem-solving"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 1200
+      },
+      "taxonomy": {
+        "domain": "algorithms (Algorithmic / Computational \u2014 pathfinding + multi-objective game AI in JS)",
+        "capabilities": [
+          "language_other",
+          "algorithms",
+          "long_horizon",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "greedy_strategy_gets_stuck",
+        "doesnt_consider_block_stacking",
+        "timeout_on_complex_maps"
+      ],
+      "diagnostic_note": "Pair with blind-maze-explorer-* \u2014 strong algorithmic-reasoning signal."
+    },
+    {
+      "id": "sqlite-db-truncate",
+      "one_liner": "Recover as many rows as possible from a corrupted sqlite db, output as JSON.",
+      "upstream": {
+        "category": "debugging",
+        "tags": [
+          "file-operations"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "debugging (Security & Forensics \u2014 sqlite forensics: page-by-page row recovery)",
+        "capabilities": [
+          "reverse_engineering",
+          "language_python",
+          "shell_pipeline",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "only_reads_via_sqlite3_API",
+        "misses_unallocated_pages",
+        "wrong_output_schema"
+      ],
+      "diagnostic_note": "Tests db-internals knowledge. Failure paired with extract-elf indicates binary-format reasoning gap."
+    },
+    {
+      "id": "sqlite-with-gcov",
+      "one_liner": "Compile sqlite with gcov instrumentation, put it on PATH.",
+      "upstream": {
+        "category": "system-administration",
+        "tags": [
+          "software-installation",
+          "system"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "system-administration (Software Engineering \u2014 build sqlite with coverage instrumentation)",
+        "capabilities": [
+          "build_compile",
+          "shell_pipeline",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_CFLAGS_for_gcov",
+        "builds_without_test_coverage_target",
+        "forgets_PATH_export"
+      ],
+      "diagnostic_note": "Build-system + gcov literacy. Failure paired with build-* tasks indicates build-toolchain gap."
+    },
+    {
+      "id": "stable-parallel-kmeans",
+      "one_liner": "Implement Ben-Hur et al. (2002) stable parallel k-means in Python.",
+      "upstream": {
+        "category": "machine-learning",
+        "tags": [
+          "machine-learning",
+          "parallel-computing",
+          "clustering",
+          "performance-optimization",
+          "multiprocessing"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 1800
+      },
+      "taxonomy": {
+        "domain": "machine-learning (ML Workflow \u2014 algorithm-from-paper with parallel implementation)",
+        "capabilities": [
+          "language_python",
+          "algorithms",
+          "ml_workflow",
+          "long_horizon",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "misunderstands_stability_metric",
+        "race_in_multiprocessing",
+        "doesnt_match_reference_outputs"
+      ],
+      "diagnostic_note": "Reading-comprehension + ML + parallel. Failure paired with parallel-particle-simulator indicates parallel-programming weakness."
+    },
+    {
+      "id": "super-benchmark-upet",
+      "one_liner": "Train roberta-base on RTE with the UPET method via run.py, report eval accuracy as JSON.",
+      "upstream": {
+        "category": "model-training",
+        "tags": [
+          "super-benchmark"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 2400
+      },
+      "taxonomy": {
+        "domain": "model-training (ML Workflow \u2014 run a research training script with specific dataset/method)",
+        "capabilities": [
+          "ml_workflow",
+          "language_python",
+          "long_horizon",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_method_flag",
+        "training_doesnt_complete_in_budget",
+        "reports_train_acc_not_eval_acc"
+      ],
+      "diagnostic_note": "Tests careful flag-reading for a research script. 2400s timeout."
+    },
+    {
+      "id": "swe-bench-astropy-1",
+      "one_liner": "Fix astropy modeling.separable.separability_matrix to handle nested CompoundModels correctly.",
+      "upstream": {
+        "category": "debugging",
+        "tags": [
+          "debugging",
+          "swe-bench"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 1000
+      },
+      "taxonomy": {
+        "domain": "debugging (Software Engineering \u2014 real-world astropy bug, fix-with-tests-passing)",
+        "capabilities": [
+          "language_python",
+          "test_driven_loop",
+          "error_recovery",
+          "exploration"
+        ]
+      },
+      "failure_modes": [
+        "fix_only_top_level_compound",
+        "misses_test_for_nested",
+        "fails_to_run_full_test_suite"
+      ],
+      "diagnostic_note": "swe-bench task \u2014 strong signal on test_driven_loop and exploration. Failure paired with other swe-bench tasks is the cleanest indicator of SWE capability."
+    },
+    {
+      "id": "swe-bench-astropy-2",
+      "one_liner": "Fix astropy.ascii.qdp to accept lowercase QDP commands, not just uppercase.",
+      "upstream": {
+        "category": "debugging",
+        "tags": [
+          "coding",
+          "swe-bench"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 1000
+      },
+      "taxonomy": {
+        "domain": "debugging (Software Engineering \u2014 real-world astropy parser bug, case-insensitivity)",
+        "capabilities": [
+          "language_python",
+          "test_driven_loop",
+          "error_recovery",
+          "exploration"
+        ]
+      },
+      "failure_modes": [
+        "adds_case_insens_in_wrong_place",
+        "breaks_existing_tests",
+        "skips_re_running_full_suite"
+      ],
+      "diagnostic_note": "Pair with swe-bench-astropy-1 \u2014 both target astropy and test the same skills."
+    },
+    {
+      "id": "swe-bench-fsspec",
+      "one_liner": "Add an open_async() method to fsspec's DirFileSystem for proper async operation.",
+      "upstream": {
+        "category": "debugging",
+        "tags": [
+          "swe-bench",
+          "coding"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 1000
+      },
+      "taxonomy": {
+        "domain": "debugging (Software Engineering \u2014 add a missing async method to a real library)",
+        "capabilities": [
+          "language_python",
+          "test_driven_loop",
+          "exploration",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "forgets_async_def",
+        "wraps_sync_in_thread_incorrectly",
+        "breaks_inheritance_chain"
+      ],
+      "diagnostic_note": "Tests async-Python fluency. Failure paired with kv-store-grpc indicates async/network library gaps."
+    },
+    {
+      "id": "swe-bench-langcodes",
+      "one_liner": "Fix langcodes Language.__hash__ which is broken (returns inconsistent hashes for equal objects).",
+      "upstream": {
+        "category": "debugging",
+        "tags": [
+          "coding",
+          "swe-bench"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "debugging (Software Engineering \u2014 fix the dunder-method invariants of an equal/hash pair)",
+        "capabilities": [
+          "language_python",
+          "test_driven_loop",
+          "error_recovery"
+        ]
+      },
+      "failure_modes": [
+        "wrong_field_subset_in_hash",
+        "breaks_equality",
+        "fails_to_run_test_for___hash__"
+      ],
+      "diagnostic_note": "Classic __hash__/__eq__ invariant. Failure indicates Python-internals gap."
+    },
+    {
+      "id": "tmux-advanced-workflow",
+      "one_liner": "Use tmux panes to monitor and debug a real-time data-processing pipeline.",
+      "upstream": {
+        "category": "debugging",
+        "tags": [
+          "data-processing",
+          "debugging",
+          "system"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "debugging (System Administration \u2014 tmux pane orchestration for live monitoring)",
+        "capabilities": [
+          "shell_pipeline",
+          "error_recovery",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "tmux_pane_layout_wrong",
+        "doesnt_actually_read_logs_live",
+        "fixes_without_evidence"
+      ],
+      "diagnostic_note": "Tests live-debugging workflow. Failure indicates poor real-time troubleshooting style."
+    },
+    {
+      "id": "train-fasttext",
+      "one_liner": "Train a fasttext model on yelp data, \u2264150MB and \u22650.62 accuracy on a private test set.",
+      "upstream": {
+        "category": "model-training",
+        "tags": [
+          "data-processing",
+          "data-science"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 600
+      },
+      "taxonomy": {
+        "domain": "model-training (ML Workflow \u2014 supervised fasttext with size + accuracy joint constraint)",
+        "capabilities": [
+          "ml_workflow",
+          "language_python",
+          "data_processing",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "model_too_large_after_default_train",
+        "accuracy_below_threshold",
+        "forgets_quantize_step"
+      ],
+      "diagnostic_note": "Tight joint constraint forces quantization or careful hyperparams. Failure indicates the agent didn't model the trade-off space."
+    },
+    {
+      "id": "vim-terminal-task",
+      "one_liner": "USING vim, create text_processor.py \u2014 read file, count word freq, print top-5.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "coding",
+          "data-processing",
+          "file-operations"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 180
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Software Engineering \u2014 tight 180s task that MUST be done in vim, not the agent's normal file-write tool)",
+        "capabilities": [
+          "shell_pipeline",
+          "language_python",
+          "file_editing",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "uses_echo_or_write_tool_instead_of_vim",
+        "doesnt_save_buffer",
+        "wrong_word_count_logic"
+      ],
+      "diagnostic_note": "ONLY 180s \u2014 testing interactive-tool efficiency. Failure paired with other interactive tasks indicates the agent can't drive vim, or worked around the vim requirement (which the verifier may catch)."
+    },
+    {
+      "id": "word2vec-from-scratch",
+      "one_liner": "Implement Word2Vec from scratch in pytorch \u2014 embeddings must solve analogies like 'Beijing - China + Japan \u2248 Tokyo'.",
+      "upstream": {
+        "category": "model-training",
+        "tags": [
+          "pytorch",
+          "nlp",
+          "word-embeddings",
+          "from-scratch-implementation",
+          "semantic-learning"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 1200
+      },
+      "taxonomy": {
+        "domain": "model-training (ML Workflow \u2014 implement skip-gram or CBOW with subsampling, train, verify analogies)",
+        "capabilities": [
+          "ml_workflow",
+          "language_python",
+          "algorithms",
+          "long_horizon",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "no_negative_sampling",
+        "forgets_subsampling",
+        "embedding_dim_too_small",
+        "analogy_test_unmet"
+      ],
+      "diagnostic_note": "Heavy ML-from-first-principles task. Pair with gpt2-codegolf for ML-internals signal."
+    },
+    {
+      "id": "write-compressor",
+      "one_liner": "Given a decompressor in C, write a compressor that produces data.comp that decompresses back to data.txt.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "coding"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 360
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Software Engineering \u2014 reverse-engineer a decoder to produce a matching encoder)",
+        "capabilities": [
+          "language_c_cpp",
+          "reverse_engineering",
+          "algorithms",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "misreads_decompressor_state_machine",
+        "off_by_one_in_back-reference",
+        "encodes_byte_unsafely"
+      ],
+      "diagnostic_note": "Strong RE + algorithm signal. Pair with path-tracing-reverse and write-compressor for reverse-engineering capability."
+    },
+    {
+      "id": "adaptive-rejection-sampler",
+      "one_liner": "Implement an adaptive rejection sampler per Gilks et al. (1992) with input validation.",
+      "upstream": {
+        "category": "scientific-computing",
+        "tags": [
+          "applied-statistics",
+          "adaptive-rejection-sampling",
+          "Bayesian-inference",
+          "simulation"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "scientific-computing (Scientific Computing \u2014 implement a specific Bayesian sampling algorithm from a paper)",
+        "capabilities": [
+          "language_python",
+          "algorithms",
+          "ml_workflow",
+          "long_horizon",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_envelope_construction",
+        "accepts_outside_support",
+        "fails_to_validate_inputs"
+      ],
+      "diagnostic_note": "Reading-from-paper task. Failure paired with mcmc-sampling-stan and bn-fit-modify indicates weak Bayesian-stats reach; failure alone with other algorithm tasks passing means the agent didn't model the rejection geometry."
+    },
+    {
+      "id": "bn-fit-modify",
+      "one_liner": "Recover the DAG and parameters of a Bayesian network from a 10k-row CSV sample.",
+      "upstream": {
+        "category": "scientific-computing",
+        "tags": [
+          "bayesian-network",
+          "stats"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 3600
+      },
+      "taxonomy": {
+        "domain": "scientific-computing (ML Workflow \u2014 structure learning + parameter estimation for a discrete BN)",
+        "capabilities": [
+          "language_python",
+          "ml_workflow",
+          "algorithms",
+          "long_horizon",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_independence_test",
+        "ignores_provided_hints",
+        "picks_acyclic_but_wrong_DAG"
+      ],
+      "diagnostic_note": "Structure learning + statistics. Failure paired with distribution-search and adaptive-rejection-sampler signals weak probabilistic reasoning."
+    },
+    {
+      "id": "break-filter-js-from-html",
+      "one_liner": "Find an HTML payload that bypasses a Python JS-filter to inject XSS.",
+      "upstream": {
+        "category": "security",
+        "tags": [
+          "security"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 1200
+      },
+      "taxonomy": {
+        "domain": "security (Security & Forensics \u2014 adversarial: write a payload that beats a given sanitizer)",
+        "capabilities": [
+          "language_python",
+          "reverse_engineering",
+          "self_verification",
+          "algorithms"
+        ]
+      },
+      "failure_modes": [
+        "only_tries_common_payloads",
+        "doesnt_inspect_filter_logic",
+        "unverified_against_filter"
+      ],
+      "diagnostic_note": "Adversarial pair to filter-js-from-html. Passing this while failing the defensive twin means the agent thinks adversarially but not defensively; opposite is also informative."
+    },
+    {
+      "id": "build-cython-ext",
+      "one_liner": "Install pyknotid's Cython extensions despite an existing numpy-version conflict.",
+      "upstream": {
+        "category": "debugging",
+        "tags": [
+          "coding",
+          "dependency",
+          "compilation"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "debugging (Software Engineering \u2014 resolve Cython build with conflicting numpy ABI)",
+        "capabilities": [
+          "build_compile",
+          "language_python",
+          "error_recovery",
+          "exploration"
+        ]
+      },
+      "failure_modes": [
+        "downgrades_numpy_destructively",
+        "skips_cython_compile_step",
+        "ignores_ABI_warning"
+      ],
+      "diagnostic_note": "Tests Python build-toolchain literacy. Failure paired with incompatible-python-fasttext indicates weak C-extension/build reasoning."
+    },
+    {
+      "id": "build-pmars",
+      "one_liner": "Build pMARS (CoreWars simulator) from Debian source, install binary without X11.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "build-tools",
+          "compilation",
+          "debian",
+          "gaming",
+          "pmars",
+          "corewars"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "software-engineering (System Administration \u2014 build legacy C from Debian source package with feature flags)",
+        "capabilities": [
+          "build_compile",
+          "shell_pipeline",
+          "language_c_cpp",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "pulls_X11_dep_anyway",
+        "wrong_install_prefix",
+        "missing_dpkg-source_workflow"
+      ],
+      "diagnostic_note": "Debian-source-package literacy. Failure paired with build-pov-ray and compile-compcert indicates legacy-build weakness."
+    },
+    {
+      "id": "build-pov-ray",
+      "one_liner": "Build POV-Ray 2.2 from source archives, install to /usr/local/bin, render a test scene.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "build-tools",
+          "compilation",
+          "graphics",
+          "ray-tracing",
+          "legacy-software",
+          "research"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 12000
+      },
+      "taxonomy": {
+        "domain": "software-engineering (System Administration \u2014 long-horizon build of a 1990s graphics codebase)",
+        "capabilities": [
+          "build_compile",
+          "long_horizon",
+          "language_c_cpp",
+          "error_recovery",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "fails_on_old_C_dialect",
+        "missing_legacy_lib",
+        "gives_up_on_warning_promoted_errors"
+      ],
+      "diagnostic_note": "12000s timeout is generous; failure typically means the agent didn't iterate through old-K&R-style compile errors."
+    },
+    {
+      "id": "caffe-cifar-10",
+      "one_liner": "Install BVLC Caffe 1.0.0 CPU-only, train CIFAR-10 CNN for exactly 500 iters.",
+      "upstream": {
+        "category": "machine-learning",
+        "tags": [
+          "cnn",
+          "caffe"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 1200
+      },
+      "taxonomy": {
+        "domain": "machine-learning (ML Workflow \u2014 install legacy ML framework + run classic benchmark)",
+        "capabilities": [
+          "build_compile",
+          "ml_workflow",
+          "language_python",
+          "long_horizon",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "fails_caffe_build",
+        "wrong_iter_count",
+        "uses_GPU_instead_of_CPU_only"
+      ],
+      "diagnostic_note": "Legacy ML stack \u2014 Caffe builds are notoriously thorny. Failure paired with caffe-* siblings indicates legacy-framework gap."
+    },
+    {
+      "id": "cancel-async-tasks",
+      "one_liner": "Implement async run_tasks with bounded concurrency and clean cancellation on first error.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "async",
+          "concurrency",
+          "python"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Software Engineering \u2014 bounded-concurrency async runner with structured cancellation)",
+        "capabilities": [
+          "language_python",
+          "algorithms",
+          "test_driven_loop",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "leaks_tasks_on_cancel",
+        "wrong_semaphore_release_order",
+        "not_re-raising_first_exception"
+      ],
+      "diagnostic_note": "Tests async-Python depth. Failure paired with swe-bench-fsspec indicates async-API weakness."
+    },
+    {
+      "id": "circuit-fibsqrt",
+      "one_liner": "Produce gates.txt that, when run through sim.c, computes floor(sqrt(fib(N))) on inputs.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "software-engineering"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 3600
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Algorithmic / Computational \u2014 synthesize a digital circuit to compute a function)",
+        "capabilities": [
+          "algorithms",
+          "reverse_engineering",
+          "language_python",
+          "long_horizon",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "arithmetic_not_actually_in_gates",
+        "off_by_one_bitwidth",
+        "doesnt_verify_against_sim"
+      ],
+      "diagnostic_note": "Hardest synthesis task in the set. Combines Boolean circuit construction with arithmetic. Failure expected unless the agent decomposes carefully."
+    },
+    {
+      "id": "code-from-image",
+      "one_liner": "OCR a pseudocode image, implement it in any language, write the final printed value.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "ocr"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 1200
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Software Engineering \u2014 vision + transcription + correct implementation)",
+        "capabilities": [
+          "language_python",
+          "ml_workflow",
+          "self_verification",
+          "algorithms"
+        ]
+      },
+      "failure_modes": [
+        "OCR_misreads_a_character",
+        "picks_wrong_language_idiom",
+        "computes_wrong_termination"
+      ],
+      "diagnostic_note": "Two-stage: vision then logic. Failure paired with extract-moves-from-video and chess-best-move indicates vision-pipeline weakness."
+    },
+    {
+      "id": "compile-compcert",
+      "one_liner": "Build CompCert 3.13.1 verified C compiler from source, target the current OS/ISA.",
+      "upstream": {
+        "category": "system-administration",
+        "tags": [
+          "compilation",
+          "compilers"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 2400
+      },
+      "taxonomy": {
+        "domain": "system-administration (System Administration \u2014 build a Coq-based verified compiler with OCaml toolchain)",
+        "capabilities": [
+          "build_compile",
+          "long_horizon",
+          "language_other",
+          "error_recovery",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "missing_coq_version",
+        "wrong_target_triple",
+        "gives_up_on_OCaml_version_mismatch"
+      ],
+      "diagnostic_note": "Requires OCaml + Coq toolchain coordination. Pair with build-* and fix-ocaml-gc for legacy-build signal."
+    },
+    {
+      "id": "constraints-scheduling",
+      "one_liner": "Find a 1-hour meeting slot satisfying calendar constraints for Alice/Bob/Carol.",
+      "upstream": {
+        "category": "personal-assistant",
+        "tags": [
+          "calendar",
+          "scheduling",
+          "constraint-satisfaction",
+          "ics-parsing",
+          "temporal-reasoning"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 1200
+      },
+      "taxonomy": {
+        "domain": "personal-assistant (Algorithmic / Computational \u2014 temporal CSP over .ics + preference rules)",
+        "capabilities": [
+          "language_python",
+          "algorithms",
+          "data_processing",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "ignores_a_constraint",
+        "wrong_timezone_handling",
+        "picks_first_feasible_not_best"
+      ],
+      "diagnostic_note": "Tests temporal/CSP reasoning. Failure paired with constraint-style tasks indicates weak rule composition."
+    },
+    {
+      "id": "custom-memory-heap-crash",
+      "one_liner": "Fix /app/user.cpp so a release-mode-only crash disappears without touching other files.",
+      "upstream": {
+        "category": "debugging",
+        "tags": [
+          "cpp",
+          "memory-management",
+          "debugging"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 1800
+      },
+      "taxonomy": {
+        "domain": "debugging (Software Engineering \u2014 undefined-behavior memory bug invisible under -O0)",
+        "capabilities": [
+          "language_c_cpp",
+          "error_recovery",
+          "reverse_engineering",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "fixes_DEBUG_path_too",
+        "masks_UB_with_volatile",
+        "misidentifies_alignment_vs_lifetime"
+      ],
+      "diagnostic_note": "Classic 'works in debug, crashes in release' \u2014 usually UB. Failure paired with other C/C++ tasks indicates undefined-behavior blind spot."
+    },
+    {
+      "id": "db-wal-recovery",
+      "one_liner": "Recover 11 rows from a SQLite DB with a corrupted/encrypted WAL (only 5 visible via API).",
+      "upstream": {
+        "category": "file-operations",
+        "tags": [
+          "database",
+          "encryption",
+          "recovery"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "file-operations (Security & Forensics \u2014 sqlite WAL forensics + manual page parsing)",
+        "capabilities": [
+          "reverse_engineering",
+          "shell_pipeline",
+          "language_python",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "trusts_sqlite3_API",
+        "misses_WAL_frame_format",
+        "decrypts_with_wrong_key"
+      ],
+      "diagnostic_note": "Sibling of sqlite-db-truncate. Forensics + format knowledge."
+    },
+    {
+      "id": "distribution-search",
+      "one_liner": "Find a target probability distribution for LLM-confidence metrics matching given KL constraints.",
+      "upstream": {
+        "category": "machine-learning",
+        "tags": [
+          "coding",
+          "statistics",
+          "machine-learning"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 3600
+      },
+      "taxonomy": {
+        "domain": "machine-learning (ML Workflow \u2014 numerical optimization to match KL-divergence targets)",
+        "capabilities": [
+          "language_python",
+          "ml_workflow",
+          "algorithms",
+          "long_horizon",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "picks_optimizer_that_diverges",
+        "wrong_KL_direction",
+        "doesnt_validate_on_held_out"
+      ],
+      "diagnostic_note": "Numerical optimization with information-theoretic objective. Failure indicates weak optimizer-choice intuition."
+    },
+    {
+      "id": "dna-assembly",
+      "one_liner": "Design a cloning strategy (sequences) inserting egfp+flag tags into a circular plasmid.",
+      "upstream": {
+        "category": "scientific-computing",
+        "tags": [
+          "biology",
+          "cloning"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 1800
+      },
+      "taxonomy": {
+        "domain": "scientific-computing (Scientific Computing \u2014 molecular cloning design problem)",
+        "capabilities": [
+          "language_python",
+          "algorithms",
+          "data_processing",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_reading_frame",
+        "misplaces_GS_linker",
+        "invalid_restriction_sites"
+      ],
+      "diagnostic_note": "Bioinformatics niche. Failure expected for most general agents; passing is strong domain-knowledge signal."
+    },
+    {
+      "id": "dna-insert",
+      "one_liner": "Design primers for NEB Q5 site-directed mutagenesis to transform input plasmid into target.",
+      "upstream": {
+        "category": "scientific-computing",
+        "tags": [
+          "biology",
+          "cloning"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 1800
+      },
+      "taxonomy": {
+        "domain": "scientific-computing (Scientific Computing \u2014 primer design with melting-temperature constraints)",
+        "capabilities": [
+          "language_python",
+          "algorithms",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_Tm",
+        "primer_self_dimer",
+        "mis_orients_primer"
+      ],
+      "diagnostic_note": "Sibling of dna-assembly. Easier \u2014 only primer design, not full assembly."
+    },
+    {
+      "id": "filter-js-from-html",
+      "one_liner": "Write a Python HTML sanitizer that strips JS without breaking standard formatting.",
+      "upstream": {
+        "category": "security",
+        "tags": [
+          "security"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "security (Security & Forensics \u2014 defensive: write a robust XSS sanitizer)",
+        "capabilities": [
+          "language_python",
+          "algorithms",
+          "self_verification",
+          "file_editing"
+        ]
+      },
+      "failure_modes": [
+        "regex_based_misses_obfuscated_JS",
+        "strips_too_aggressively",
+        "fails_data_URI_handling"
+      ],
+      "diagnostic_note": "Defensive pair to break-filter-js-from-html. Together they show whether the agent thinks in both directions."
+    },
+    {
+      "id": "financial-document-processor",
+      "one_liner": "Classify /app/documents/ files as invoice vs other, move invoices, OCR the JPGs/PDFs.",
+      "upstream": {
+        "category": "data-processing",
+        "tags": [
+          "ocr",
+          "image-processing",
+          "financial",
+          "file-operations"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 1200
+      },
+      "taxonomy": {
+        "domain": "data-processing (Data Processing & Extraction \u2014 OCR + classification + file organization pipeline)",
+        "capabilities": [
+          "language_python",
+          "ml_workflow",
+          "data_processing",
+          "self_verification",
+          "shell_pipeline"
+        ]
+      },
+      "failure_modes": [
+        "picks_OCR_that_chokes_on_pdf",
+        "classifier_too_aggressive",
+        "moves_files_to_wrong_dir"
+      ],
+      "diagnostic_note": "Multi-stage. Failure paired with code-from-image indicates OCR pipeline gap; failure with reshard-c4-data indicates file-organization gap."
+    },
+    {
+      "id": "fix-code-vulnerability",
+      "one_liner": "Identify and fix a CWE vulnerability in a given GitHub repo without breaking functionality.",
+      "upstream": {
+        "category": "security",
+        "tags": [
+          "security",
+          "code-vulnerability",
+          "common-weakness-enumeration"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "security (Security & Forensics \u2014 CWE-classified vulnerability fix in real code)",
+        "capabilities": [
+          "language_python",
+          "exploration",
+          "error_recovery",
+          "self_verification",
+          "file_editing"
+        ]
+      },
+      "failure_modes": [
+        "fixes_wrong_CWE",
+        "breaks_existing_tests",
+        "applies_overly_aggressive_input_validation"
+      ],
+      "diagnostic_note": "Tests vulnerability literacy across CWE categories. Failure paired with break-filter-js indicates adversarial reasoning gap."
+    },
+    {
+      "id": "fix-ocaml-gc",
+      "one_liner": "Debug a custom OCaml GC modification that crashes the OCaml compiler during sweeping.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "troubleshooting"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 3600
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Software Engineering \u2014 fix a runtime-internals bug in the OCaml GC's C code)",
+        "capabilities": [
+          "language_c_cpp",
+          "language_other",
+          "error_recovery",
+          "reverse_engineering",
+          "long_horizon",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "misreads_run-length_encoding",
+        "fixes_only_one_path_through_GC",
+        "wrong_invariant_repair"
+      ],
+      "diagnostic_note": "Deep runtime work. Strong negative signal if failed \u2014 but expected for most agents."
+    },
+    {
+      "id": "gcode-to-text",
+      "one_liner": "Parse text.gcode (Prusa MK4s) and compute what text would actually be printed.",
+      "upstream": {
+        "category": "file-operations",
+        "tags": [
+          "file-operations"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "file-operations (Algorithmic / Computational \u2014 geometric parsing of motion commands into rendered letters)",
+        "capabilities": [
+          "language_python",
+          "algorithms",
+          "reverse_engineering",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "confuses_extrusion_vs_travel",
+        "wrong_letter_height_inference",
+        "ignores_z-hop_motions"
+      ],
+      "diagnostic_note": "Unique geometric-parsing task. Failure indicates weak structural reasoning over coordinate streams."
+    },
+    {
+      "id": "git-leak-recovery",
+      "one_liner": "Recover a secret from a repo's rewritten git history; then re-sanitize the history.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "git",
+          "security"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Security & Forensics \u2014 git internals: reflog/objects scan for orphaned blobs)",
+        "capabilities": [
+          "git_workflow",
+          "exploration",
+          "reverse_engineering",
+          "self_verification",
+          "shell_pipeline"
+        ]
+      },
+      "failure_modes": [
+        "only_checks_HEAD",
+        "misses_pack_objects",
+        "writes_secret_in_clean-up_commit"
+      ],
+      "diagnostic_note": "Sibling of sanitize-git-repo. Tests git-objects deep familiarity."
+    },
+    {
+      "id": "headless-terminal",
+      "one_liner": "[UNVERIFIED] Task description not located on upstream; sentinel entry for coverage.",
+      "upstream": {
+        "category": "unknown",
+        "tags": [],
+        "difficulty": "unknown",
+        "timeout_sec": 0
+      },
+      "taxonomy": {
+        "domain": "unknown (Software Engineering \u2014 placeholder; update when source is identified)",
+        "capabilities": [
+          "language_python",
+          "shell_pipeline"
+        ]
+      },
+      "failure_modes": [
+        "catalog_metadata_missing"
+      ],
+      "diagnostic_note": "This entry is a sentinel \u2014 the task.yaml could not be located on either dataset/terminal-bench-core/v0.2.x or main's original-tasks/. Update with verified details when the source is identified. Reporter will count it but per-failure detail will be sparse."
+    },
+    {
+      "id": "install-windows-3.11",
+      "one_liner": "Boot Windows 3.11 for Workgroups in qemu 5.2.0 with VNC display :1.",
+      "upstream": {
+        "category": "system-administration",
+        "tags": [
+          "virtualization",
+          "qemu",
+          "windows-3.11",
+          "vnc",
+          "sys-admin",
+          "retro-computing"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 3600
+      },
+      "taxonomy": {
+        "domain": "system-administration (System Administration \u2014 boot retro OS in qemu with specific VNC config)",
+        "capabilities": [
+          "container_ops",
+          "networking",
+          "shell_pipeline",
+          "long_horizon",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_qemu_machine_type",
+        "forgets_-vnc_:1",
+        "misses_display_argument"
+      ],
+      "diagnostic_note": "Retro-emulation literacy. Failure paired with qemu-* tasks indicates qemu CLI gaps."
+    },
+    {
+      "id": "large-scale-text-editing",
+      "one_liner": "Transform a 1M-row CSV using vim macros only; save as /app/apply_macros.vim.",
+      "upstream": {
+        "category": "file-operations",
+        "tags": [
+          "text-editing",
+          "large-scale-text-manipulation",
+          "vim",
+          "vim-macros"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 1200
+      },
+      "taxonomy": {
+        "domain": "file-operations (Software Engineering \u2014 vim macro programming at scale, not pandas)",
+        "capabilities": [
+          "shell_pipeline",
+          "algorithms",
+          "self_verification",
+          "file_editing"
+        ]
+      },
+      "failure_modes": [
+        "macros_too_slow",
+        "uses_sed_instead_of_vim",
+        "forgets_register_assignment"
+      ],
+      "diagnostic_note": "Pair with vim-terminal-task. Tests vim depth beyond basic edits."
+    },
+    {
+      "id": "largest-eigenval",
+      "one_liner": "Implement find_dominant_eigenvalue_and_eigenvector for real square matrices up to 10x10.",
+      "upstream": {
+        "category": "mathematics",
+        "tags": [
+          "coding",
+          "optimization",
+          "constraint",
+          "numerical-approximation"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "mathematics (Algorithmic / Computational \u2014 power-iteration or similar numerical algorithm)",
+        "capabilities": [
+          "language_python",
+          "algorithms",
+          "self_verification",
+          "test_driven_loop"
+        ]
+      },
+      "failure_modes": [
+        "uses_numpy_eig_when_disallowed",
+        "wrong_convergence_criterion",
+        "sign_ambiguity_in_eigenvector"
+      ],
+      "diagnostic_note": "Numerical algorithms basics. Failure indicates weak iterative-numerical reasoning."
+    },
+    {
+      "id": "llm-inference-batching-scheduler",
+      "one_liner": "Implement a shape-aware static-graph LLM inference batching scheduler.",
+      "upstream": {
+        "category": "machine-learning",
+        "tags": [
+          "batching",
+          "inference",
+          "performance-optimization",
+          "scheduling"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 1800
+      },
+      "taxonomy": {
+        "domain": "machine-learning (ML Workflow \u2014 production-style inference scheduler with shape constraints)",
+        "capabilities": [
+          "language_python",
+          "algorithms",
+          "ml_workflow",
+          "long_horizon",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "picks_bucket_size_wrong",
+        "starves_short_sequences",
+        "wrong_priority_function"
+      ],
+      "diagnostic_note": "Production ML systems task. Pair with torch-pipeline/tensor-parallelism for inference-systems signal."
+    },
+    {
+      "id": "log-summary-date-ranges",
+      "one_liner": "Summarize per-source logs aggregated by date ranges in /app/logs/.",
+      "upstream": {
+        "category": "data-processing",
+        "tags": [
+          "log-analysis",
+          "report-generation",
+          "data-processing"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "data-processing (Data Processing & Extraction \u2014 multi-file log aggregation with date bucketing)",
+        "capabilities": [
+          "shell_pipeline",
+          "language_python",
+          "data_processing",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_date_bucket_edges",
+        "misses_files_with_unusual_naming",
+        "forgets_per-source_split"
+      ],
+      "diagnostic_note": "Standard log aggregation. Failure indicates the agent didn't sample log files before designing aggregation."
+    },
+    {
+      "id": "mailman",
+      "one_liner": "Spin up postfix+mailman3 mailing list reading-group@local.edu with core functionality.",
+      "upstream": {
+        "category": "system-administration",
+        "tags": [
+          "email-server",
+          "mailing-list"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 1800
+      },
+      "taxonomy": {
+        "domain": "system-administration (System Administration \u2014 multi-service email pipeline: postfix + mailman3 + db)",
+        "capabilities": [
+          "networking",
+          "shell_pipeline",
+          "file_editing",
+          "long_horizon",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "postfix_not_routing_to_mailman",
+        "auth_not_configured",
+        "missing_dns_or_aliases"
+      ],
+      "diagnostic_note": "Heavy multi-service config. Failure paired with home-server-https indicates multi-component orchestration gap."
+    },
+    {
+      "id": "mcmc-sampling-stan",
+      "one_liner": "Install RStan 2.32.7, fit a hierarchical Bayesian model, report posterior means.",
+      "upstream": {
+        "category": "data-science",
+        "tags": [
+          "R",
+          "stan",
+          "bayesian-statistics",
+          "mcmc"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 1800
+      },
+      "taxonomy": {
+        "domain": "data-science (Scientific Computing \u2014 Bayesian MCMC with R/Stan)",
+        "capabilities": [
+          "language_other",
+          "ml_workflow",
+          "build_compile",
+          "long_horizon",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "RStan_install_fails",
+        "model_doesnt_converge",
+        "wrong_summary_extraction"
+      ],
+      "diagnostic_note": "R + Stan combined. Failure indicates non-Python statistics ecosystem gap."
+    },
+    {
+      "id": "merge-diff-arc-agi-task",
+      "one_liner": "Fetch two git bundles into one repo on different branches, merge, capture diff state.",
+      "upstream": {
+        "category": "debugging",
+        "tags": [
+          "git",
+          "coding"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "debugging (Software Engineering \u2014 git bundle workflow with branch isolation)",
+        "capabilities": [
+          "git_workflow",
+          "shell_pipeline",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "forgets_HEAD_ref",
+        "merges_into_wrong_branch",
+        "loses_bundle_2_history"
+      ],
+      "diagnostic_note": "Tests git-bundle literacy. Failure paired with fix-git indicates weak git tooling."
+    },
+    {
+      "id": "model-extraction-relu-logits",
+      "one_liner": "Extract weights/biases of a one-hidden-layer ReLU NN by querying forward.py.",
+      "upstream": {
+        "category": "mathematics",
+        "tags": [
+          "security"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "mathematics (Security & Forensics \u2014 cryptanalytic NN model extraction via input probing)",
+        "capabilities": [
+          "language_python",
+          "algorithms",
+          "reverse_engineering",
+          "ml_workflow",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "misses_critical_points_of_ReLU",
+        "numerical_jitter_in_finite_differences",
+        "ill_conditioned_solve"
+      ],
+      "diagnostic_note": "Cryptanalytic NN attack. Failure indicates weak adversarial-ML reasoning."
+    },
+    {
+      "id": "modernize-scientific-stack",
+      "one_liner": "Port broken Python 2.7 climate-analysis code to current Python.",
+      "upstream": {
+        "category": "scientific-computing",
+        "tags": [
+          "python-migration",
+          "scientific-computing",
+          "legacy-modernization",
+          "climate-science",
+          "data-processing"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 600
+      },
+      "taxonomy": {
+        "domain": "scientific-computing (Software Engineering \u2014 Py2-to-Py3 migration of scientific code)",
+        "capabilities": [
+          "language_python",
+          "error_recovery",
+          "data_processing",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "misses_unicode_strings",
+        "wrong_division_semantics",
+        "loses_pickle_compat"
+      ],
+      "diagnostic_note": "Classic 2-to-3 port. Failure indicates Python-version dialect blind spots."
+    },
+    {
+      "id": "mteb-leaderboard",
+      "one_liner": "Identify the best Scandinavian embedding model on the MTEB leaderboard.",
+      "upstream": {
+        "category": "data-science",
+        "tags": [
+          "retrieval",
+          "mteb"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 3600
+      },
+      "taxonomy": {
+        "domain": "data-science (ML Workflow \u2014 read MTEB leaderboard, return canonical org/model_name)",
+        "capabilities": [
+          "networking",
+          "ml_workflow",
+          "language_python",
+          "exploration"
+        ]
+      },
+      "failure_modes": [
+        "picks_wrong_leaderboard_filter",
+        "returns_alias_not_canonical_name",
+        "ignores_revision_pin"
+      ],
+      "diagnostic_note": "Web/leaderboard reading. Failure paired with mteb-retrieve indicates poor MTEB ecosystem reach."
+    },
+    {
+      "id": "mteb-retrieve",
+      "one_liner": "Run mteb retrieval with bge-small-zh-v1.5 to find 5th-best document for a query.",
+      "upstream": {
+        "category": "data-science",
+        "tags": [
+          "data-processing",
+          "data-science",
+          "mteb"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 1800
+      },
+      "taxonomy": {
+        "domain": "data-science (ML Workflow \u2014 bge model load + similarity ranking with specific revision)",
+        "capabilities": [
+          "language_python",
+          "ml_workflow",
+          "data_processing",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_revision_pin",
+        "wrong_similarity_metric",
+        "off_by_one_in_rank"
+      ],
+      "diagnostic_note": "Pair with mteb-leaderboard for MTEB ecosystem signal."
+    },
+    {
+      "id": "multi-source-data-merger",
+      "one_liner": "Merge users from JSON/CSV/parquet with priority order and schema mapping.",
+      "upstream": {
+        "category": "data-processing",
+        "tags": [
+          "data-processing",
+          "etl",
+          "schema-mapping",
+          "conflict-resolution",
+          "pandas",
+          "parquet"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "data-processing (Data Processing & Extraction \u2014 multi-source ETL with explicit priority conflict resolution)",
+        "capabilities": [
+          "language_python",
+          "data_processing",
+          "file_editing",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_priority_order",
+        "schema_field_name_mismatch",
+        "forgets_to_dedupe"
+      ],
+      "diagnostic_note": "Classic ETL pattern. Failure paired with reshard-c4-data indicates data-processing gaps."
+    },
+    {
+      "id": "overfull-hbox",
+      "one_liner": "Edit /app/input.tex by word substitution to eliminate all LaTeX overfull hbox warnings.",
+      "upstream": {
+        "category": "debugging",
+        "tags": [
+          "latex",
+          "document-processing",
+          "combinatorial-optimization"
+        ],
+        "difficulty": "easy",
+        "timeout_sec": 750
+      },
+      "taxonomy": {
+        "domain": "debugging (Algorithmic / Computational \u2014 combinatorial word-substitution to satisfy typesetting constraints)",
+        "capabilities": [
+          "language_python",
+          "algorithms",
+          "test_driven_loop",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "substitutes_too_aggressively",
+        "misses_other_overfull_boxes",
+        "breaks_meaning"
+      ],
+      "diagnostic_note": "Tests CSP + LaTeX tool literacy. Failure usually means the agent didn't run pdflatex iteratively."
+    },
+    {
+      "id": "portfolio-optimization",
+      "one_liner": "Replace nested-loop Python portfolio risk/return with a faster C extension.",
+      "upstream": {
+        "category": "optimization",
+        "tags": [
+          "c-programming",
+          "python-extension",
+          "optimization"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 3600
+      },
+      "taxonomy": {
+        "domain": "optimization (Software Engineering \u2014 Python C-extension for hot-path numerics)",
+        "capabilities": [
+          "language_c_cpp",
+          "language_python",
+          "build_compile",
+          "algorithms",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "python-c_boundary_overhead",
+        "wrong_memory_layout",
+        "not_actually_faster"
+      ],
+      "diagnostic_note": "Tests CPython extension + numerical perf. Pair with circuit-fibsqrt for low-level perf signal."
+    },
+    {
+      "id": "protein-assembly",
+      "one_liner": "Design a fluorescent protein construct (DHFR + FRET pair) compatible with given filter cube.",
+      "upstream": {
+        "category": "scientific-computing",
+        "tags": [
+          "biology",
+          "cloning",
+          "proteins"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 1800
+      },
+      "taxonomy": {
+        "domain": "scientific-computing (Scientific Computing \u2014 protein design with optical spectrum constraints)",
+        "capabilities": [
+          "language_python",
+          "algorithms",
+          "self_verification",
+          "data_processing"
+        ]
+      },
+      "failure_modes": [
+        "wrong_FRET_pair_spectra",
+        "wrong_linker_length",
+        "violates_filter_compatibility"
+      ],
+      "diagnostic_note": "Deep biology + optics niche. Failure expected unless the agent has bio-FRET-pair knowledge."
+    },
+    {
+      "id": "pypi-server",
+      "one_liner": "Create a 'vectorops' package, host it on a local PyPI server on :8080, pip-installable.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "coding",
+          "system"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Software Engineering \u2014 Python packaging + local pypi-server hosting)",
+        "capabilities": [
+          "language_python",
+          "build_compile",
+          "networking",
+          "self_verification",
+          "shell_pipeline"
+        ]
+      },
+      "failure_modes": [
+        "wrong_package_layout",
+        "server_doesnt_serve_index",
+        "forgets_pip_index_url_check"
+      ],
+      "diagnostic_note": "Tests Python packaging literacy (pyproject.toml/setup.py + wheel build + index format)."
+    },
+    {
+      "id": "query-optimize",
+      "one_liner": "Optimize a slow SQL query against a SQLite OEWN dictionary database.",
+      "upstream": {
+        "category": "data-science",
+        "tags": [
+          "query-optimization",
+          "sql-query"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "data-science (Data Processing & Extraction \u2014 SQL query rewriting with EXPLAIN-driven indexing)",
+        "capabilities": [
+          "data_processing",
+          "algorithms",
+          "self_verification",
+          "shell_pipeline"
+        ]
+      },
+      "failure_modes": [
+        "doesnt_add_index",
+        "equivalent_query_no_perf_gain",
+        "produces_different_results"
+      ],
+      "diagnostic_note": "Tests SQL/query-plan literacy. Failure indicates the agent doesn't read EXPLAIN output."
+    },
+    {
+      "id": "regex-chess",
+      "one_liner": "Write a list of (regex, replacement) pairs that compute all-legal-next-positions from a FEN string.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "software-engineering"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 3600
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Algorithmic / Computational \u2014 express chess move generation as regex rewrites)",
+        "capabilities": [
+          "algorithms",
+          "language_python",
+          "self_verification",
+          "long_horizon"
+        ]
+      },
+      "failure_modes": [
+        "misses_castling_or_enpassant",
+        "wrong_rewrite_order",
+        "off_by_one_on_FEN_indices"
+      ],
+      "diagnostic_note": "Extreme algorithmic challenge \u2014 regex-only chess. Strong positive signal if passed."
+    },
+    {
+      "id": "regex-log",
+      "one_liner": "Write a regex that matches YYYY-MM-DD dates on lines containing an IPv4, saved to /app/regex.txt.",
+      "upstream": {
+        "category": "data-processing",
+        "tags": [
+          "regex",
+          "string-parsing",
+          "log-analysis"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "data-processing (Data Processing & Extraction \u2014 regex authoring with conditional context constraint)",
+        "capabilities": [
+          "language_python",
+          "algorithms",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "matches_invalid_dates (2026-02-30)",
+        "missing_boundary_anchoring",
+        "greedy_picks_wrong_date_on_line"
+      ],
+      "diagnostic_note": "Original smoke task from the HandOff. The 'matches only LAST date on line' constraint catches naive solutions. Compare with regex-chess for regex-depth signal."
+    },
+    {
+      "id": "rstan-to-pystan",
+      "one_liner": "Convert an R/RStan Gaussian-process script to PyStan 3.10.0.",
+      "upstream": {
+        "category": "data-science",
+        "tags": [
+          "pystan",
+          "rstan",
+          "gaussian-process"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 1800
+      },
+      "taxonomy": {
+        "domain": "data-science (Software Engineering \u2014 port between R-Stan and PyStan APIs preserving model semantics)",
+        "capabilities": [
+          "language_python",
+          "language_other",
+          "ml_workflow",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "misses_Stan_API_diff",
+        "wrong_chains/iter_config",
+        "data_shape_mismatch"
+      ],
+      "diagnostic_note": "Tests cross-language statistical API literacy."
+    },
+    {
+      "id": "sam-cell-seg",
+      "one_liner": "Use Meta's SAM to convert rectangular cell masks to polylines in histopathology annotations.",
+      "upstream": {
+        "category": "data-science",
+        "tags": [
+          "image-processing",
+          "machine-learning",
+          "histopathology"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 7200
+      },
+      "taxonomy": {
+        "domain": "data-science (ML Workflow \u2014 SAM inference + post-processing for medical image labels)",
+        "capabilities": [
+          "language_python",
+          "ml_workflow",
+          "data_processing",
+          "long_horizon",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "uses_wrong_SAM_checkpoint",
+        "conversion_loses_topology",
+        "forgets_smoothing"
+      ],
+      "diagnostic_note": "Heavy ML-tool reach (SAM). Long timeout (7200s) \u2014 failure usually means the agent gave up before running inference at scale."
+    },
+    {
+      "id": "schemelike-metacircular-eval",
+      "one_liner": "Write eval.scm that interprets the scheme-like language used by interp.py.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "software-engineering"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 2400
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Algorithmic / Computational \u2014 write a metacircular evaluator in Scheme)",
+        "capabilities": [
+          "language_other",
+          "algorithms",
+          "reverse_engineering",
+          "self_verification",
+          "long_horizon"
+        ]
+      },
+      "failure_modes": [
+        "misses_tail-call_handling",
+        "incorrect_environment_chaining",
+        "wrong_quotation_semantics"
+      ],
+      "diagnostic_note": "PL theory niche. Passing implies serious Scheme + interpreter background."
+    },
+    {
+      "id": "sparql-university",
+      "one_liner": "Run SPARQL queries on a Turtle knowledge graph of universities/departments/students.",
+      "upstream": {
+        "category": "data-querying",
+        "tags": [
+          "knowledge-graph",
+          "sparql-query",
+          "information-retrieval"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "data-querying (Data Processing & Extraction \u2014 SPARQL over .ttl with multi-join queries)",
+        "capabilities": [
+          "language_python",
+          "data_processing",
+          "algorithms",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_RDF_namespace",
+        "misses_FILTER_clause",
+        "results_in_wrong_format"
+      ],
+      "diagnostic_note": "Tests semantic-web ecosystem reach. Niche skill."
+    },
+    {
+      "id": "torch-pipeline-parallelism",
+      "one_liner": "Implement train_step_pipeline_afab for LLaMA training in /app/pipeline_parallel.py.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "system"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "software-engineering (ML Workflow \u2014 pipeline-parallel forward/backward scheduling)",
+        "capabilities": [
+          "language_python",
+          "ml_workflow",
+          "algorithms",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_microbatch_ordering",
+        "loses_gradient_accumulation",
+        "data_movement_bug"
+      ],
+      "diagnostic_note": "Production ML systems. Pair with torch-tensor-parallelism and llm-inference-batching-scheduler for distributed-ML signal."
+    },
+    {
+      "id": "torch-tensor-parallelism",
+      "one_liner": "Implement ColumnParallelLinear (and friends) in /app/parallel_linear.py.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "system"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "software-engineering (ML Workflow \u2014 tensor-parallel linear layers with collective comms)",
+        "capabilities": [
+          "language_python",
+          "ml_workflow",
+          "algorithms",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "wrong_dim_split",
+        "forgets_allreduce_in_backward",
+        "handles_bias_incorrectly"
+      ],
+      "diagnostic_note": "Production ML systems. Sibling of torch-pipeline-parallelism."
+    },
+    {
+      "id": "tune-mjcf",
+      "one_liner": "Tune a MuJoCo XML to run a 2-second simulation in \u226460% of the original time, same state.",
+      "upstream": {
+        "category": "scientific-computing",
+        "tags": [
+          "mujoco",
+          "physics",
+          "simulation",
+          "numerical-optimization"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "scientific-computing (Scientific Computing \u2014 physics-sim tuning with numerical-equivalence constraint)",
+        "capabilities": [
+          "language_python",
+          "ml_workflow",
+          "algorithms",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "changes_break_atol",
+        "loosens_integration_too_far",
+        "doesnt_benchmark"
+      ],
+      "diagnostic_note": "Constraint-aware optimization. Tests MuJoCo literacy + numerical care."
+    },
+    {
+      "id": "video-processing",
+      "one_liner": "Write jump_analyzer.py that extracts performance metrics from hurdle-jump MP4s.",
+      "upstream": {
+        "category": "video-processing",
+        "tags": [
+          "video-processing"
+        ],
+        "difficulty": "hard",
+        "timeout_sec": 3600
+      },
+      "taxonomy": {
+        "domain": "video-processing (Data Processing & Extraction \u2014 video \u2192 pose/kinematics extraction)",
+        "capabilities": [
+          "language_python",
+          "ml_workflow",
+          "data_processing",
+          "long_horizon",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "picks_pose_model_too_heavy_for_timeout",
+        "wrong_FPS_assumption",
+        "wrong_kinematic_axes"
+      ],
+      "diagnostic_note": "Vision + video pipeline. Failure paired with extract-moves-from-video indicates video-tooling gap."
+    },
+    {
+      "id": "vulnerable-secret",
+      "one_liner": "Extract a secret key from a vulnerable executable program (CTF-style).",
+      "upstream": {
+        "category": "security",
+        "tags": [
+          "security",
+          "file-operations"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 900
+      },
+      "taxonomy": {
+        "domain": "security (Security & Forensics \u2014 CTF-style binary exploitation / secret extraction)",
+        "capabilities": [
+          "reverse_engineering",
+          "cryptography",
+          "shell_pipeline",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "misses_strings_dump",
+        "wrong_input_to_trigger_bug",
+        "stops_at_first_attempt"
+      ],
+      "diagnostic_note": "CTF-flavored. Pair with crack-7z-hash and password-recovery for security-tool-reach signal."
+    },
+    {
+      "id": "winning-avg-corewars",
+      "one_liner": "Write a CoreWars warrior that wins on average against five classic opponents.",
+      "upstream": {
+        "category": "software-engineering",
+        "tags": [
+          "pmars",
+          "corewars",
+          "gaming"
+        ],
+        "difficulty": "medium",
+        "timeout_sec": 3600
+      },
+      "taxonomy": {
+        "domain": "software-engineering (Algorithmic / Computational \u2014 adversarial program in a niche assembly-like VM)",
+        "capabilities": [
+          "language_other",
+          "algorithms",
+          "reverse_engineering",
+          "long_horizon",
+          "self_verification"
+        ]
+      },
+      "failure_modes": [
+        "doesnt_inspect_opponent_code",
+        "picks_only_one_strategy",
+        "cant_match_5/5"
+      ],
+      "diagnostic_note": "CoreWars (Redcode) literacy + adversarial play. Niche but well-documented; passing implies the agent did research."
+    }
+  ]
+}

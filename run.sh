@@ -301,17 +301,80 @@ fi
 # ---------------------------------------------------------------------------
 # Run id + agent dispatch (model formatting per agent, as in the prior run.sh)
 # ---------------------------------------------------------------------------
-# Harbor session logs go under <repo>/logs/, NOT <repo>/runs/. The eval-runner
-# only syncs three paths (eval-runner src/log_sync.rs sync_selective):
-#   runner_logs/ , repo/output/ , repo/logs/
-# run.sh runs with cwd = repo/, so ${SCRIPT_DIR}/logs == repo/logs == a synced
-# path. The results JSON still lands in repo/output/ (also synced, and what the
-# runner parses); the full harbor job tree lands in repo/logs/<job> so the
-# session logs are captured by log-sync + the artifacts zip.
-LOGS_DIR="${SCRIPT_DIR}/logs"
-mkdir -p "$LOGS_DIR"
+# Harbor session logs: the eval-runner's log_sync only uploads three paths
+# (eval-runner src/log_sync.rs sync_selective): runner_logs/, repo/output/,
+# repo/logs/. run.sh's cwd is repo/, so ${SCRIPT_DIR}/logs == repo/logs is the
+# synced location and what the artifacts zip captures.
+SYNC_LOGS_DIR="${SCRIPT_DIR}/logs"
+mkdir -p "$SYNC_LOGS_DIR"
 TS="$(date +%Y-%m-%d__%H-%M-%S)"
 JOB_ID="${EVAL_RUN_ID}__${AGENT//\//_}__${MODEL//\//_}__${TS}"
+
+# ---------------------------------------------------------------------------
+# DooD-safe harbor jobs-dir.
+# ---------------------------------------------------------------------------
+# Harbor bind-mounts each trial dir into the task container as /logs — that is
+# how the agent transcript and verifier/reward.txt get out of the container.
+# Under DooD the *host* daemon resolves that bind-mount SOURCE against the HOST
+# filesystem. The eval-runner's work dir (/tmp/eval-runner/<id>/repo/logs) is
+# container-local: no such path exists on the COS host, so Docker silently
+# mounts an EMPTY dir, the verifier writes reward.txt into that orphan, harbor
+# can't find it, and EVERY trial becomes no-grade (reproduces across xyne-cli
+# AND claude-code — agent-independent, which is the tell that it's the mount).
+#
+# /var/lib/docker is the writable host-backed partition (the same one setup.sh
+# installs gcloud into), so it exists identically on host and container and
+# harbor's bind mounts resolve there. We point harbor at it and then mirror the
+# job tree back into repo/logs so log_sync still uploads it. On a native/manual
+# host run, run.sh executes on the host directly — repo/logs is already a real
+# host path — so no redirect is needed (and none happens if /var/lib/docker is
+# absent, e.g. Docker Desktop on macOS).
+if [ -d /var/lib/docker ] && [ -w /var/lib/docker ] && mkdir -p /var/lib/docker/tb-harbor-logs 2>/dev/null; then
+  HARBOR_JOBS_DIR="/var/lib/docker/tb-harbor-logs"
+  REDIRECTED_LOGS=1
+else
+  HARBOR_JOBS_DIR="$SYNC_LOGS_DIR"
+  REDIRECTED_LOGS=0
+fi
+RUN_DIR="$HARBOR_JOBS_DIR/$JOB_ID"
+
+log_step "jobs-dir / DooD visibility"
+echo "    DOCKER_HOST:     ${DOCKER_HOST:-<unset>}"
+echo "    docker server:   $(timeout 10 docker version --format '{{.Server.Version}}' 2>/dev/null || echo '<unreachable>')"
+echo "    sync logs dir:   $SYNC_LOGS_DIR   (uploaded to object storage by the eval-runner)"
+echo "    harbor jobs-dir: $HARBOR_JOBS_DIR  $([ "$REDIRECTED_LOGS" = 1 ] && echo '(redirected to host-shared partition for DooD)' || echo '(host-native; no redirect)')"
+echo "    run dir:         $RUN_DIR"
+
+# Verify the chosen jobs-dir is genuinely shared with the host daemon. This is
+# the exact failure mode behind the no-grade bug, so surface it loudly in the
+# run.sh log instead of discovering it only via empty reward files. Non-fatal:
+# the run proceeds either way, but the verdict is logged unambiguously.
+dood_shared_check() {
+  local d="$1" img="" cand marker=".dood_probe_$$_${RANDOM}"
+  command -v docker >/dev/null 2>&1 || { log_warn "[dood-check] docker CLI unavailable — skipping shared-path probe"; return; }
+  # Use an image already present locally (GAR pre-pull leaves task images
+  # cached) so the probe never depends on Docker Hub egress.
+  for cand in $(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -v '<none>' | head -5); do
+    if docker image inspect "$cand" >/dev/null 2>&1; then img="$cand"; break; fi
+  done
+  if [ -z "$img" ]; then
+    log_warn "[dood-check] no local image available to probe with — skipping (run continues; watch for no-grade)"
+    return
+  fi
+  mkdir -p "$d" 2>/dev/null
+  if timeout 90 docker run --rm --entrypoint sh -v "$d:/probe" "$img" -c "echo shared > /probe/$marker" >/dev/null 2>&1; then
+    if [ -f "$d/$marker" ]; then
+      log_ok "[dood-check] '$d' is HOST-SHARED (a daemon-launched container's write is visible here) → harbor bind-mounts will resolve; reward.txt WILL be captured."
+    else
+      log_err "[dood-check] '$d' is NOT host-shared (DooD orphan): a daemon-launched container wrote into it but the file is invisible to run.sh."
+      log_err "[dood-check] => trials will be no-grade. jobs-dir must be a path that exists identically on the COS host (add a hostPath bind-mount in the scheduler; still DooD, not DinD)."
+    fi
+    rm -f "$d/$marker" 2>/dev/null
+  else
+    log_warn "[dood-check] probe container failed to run (img=$img) — skipping shared-path verification (run continues)."
+  fi
+}
+dood_shared_check "$HARBOR_JOBS_DIR"
 
 INCLUDE_FLAGS=()
 for task in "${SELECTED[@]}"; do
@@ -362,7 +425,7 @@ harbor run \
   --model "${HARBOR_MODEL}" \
   --dataset "$DATASET" \
   "${INCLUDE_FLAGS[@]}" \
-  --jobs-dir "$LOGS_DIR" \
+  --jobs-dir "$HARBOR_JOBS_DIR" \
   --job-name "$JOB_ID" \
   --n-concurrent "$CONCURRENCY" \
   --n-attempts "$ATTEMPTS" \
@@ -374,12 +437,49 @@ harbor run \
   || log_warn "harbor run exited $HARBOR_RC — aggregating whatever graded"
 
 # ---------------------------------------------------------------------------
+# Per-trial artifact visibility. Distinguishes the two failure modes in the
+# run.sh log: a genuine agent/verifier failure (dirs present, reward missing or
+# reward<1) vs. the DooD orphan bug (whole verifier/ + agent/ dirs missing).
+# ---------------------------------------------------------------------------
+log_step "trial artifacts ($RUN_DIR)"
+if [ -d "$RUN_DIR" ]; then
+  shopt -s nullglob
+  _seen=0
+  for _t in "$RUN_DIR"/*/; do
+    _seen=1
+    _name="$(basename "$_t")"
+    if [ -f "${_t}verifier/reward.txt" ]; then
+      _r="reward=$(tr -d '\n' < "${_t}verifier/reward.txt" 2>/dev/null)"
+    else
+      _r="reward.txt:MISSING"
+    fi
+    [ -d "${_t}verifier" ] && _v="verifier/:yes" || _v="verifier/:MISSING"
+    [ -d "${_t}agent" ]    && _a="agent/:yes"    || _a="agent/:MISSING"
+    echo "    ${_name}  ->  ${_r} | ${_v} | ${_a}"
+  done
+  [ "$_seen" = 0 ] && log_warn "    no trial directories under $RUN_DIR (harbor produced no trials)"
+  shopt -u nullglob
+else
+  log_warn "    run dir does not exist: $RUN_DIR (harbor produced no job tree)"
+fi
+
+# Mirror the harbor job tree into the synced repo/logs path so the eval-runner's
+# log_sync uploads it (harbor wrote to the host-shared partition, outside repo/).
+if [ "$REDIRECTED_LOGS" = 1 ] && [ -d "$RUN_DIR" ]; then
+  if cp -a "$RUN_DIR" "$SYNC_LOGS_DIR/" 2>/dev/null; then
+    log_ok "Mirrored harbor job tree -> $SYNC_LOGS_DIR/$JOB_ID (for log-sync / artifacts)"
+  else
+    log_warn "Could not mirror harbor job tree into $SYNC_LOGS_DIR — session logs may not reach object storage"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # Aggregate per-task (a task is SOLVED if reward>=1 in >=1 attempt) and emit
 # the standardized results JSON the eval-runner reads. Same metric shape as
-# swe-auto-eval's generate_results_json (main/secondary/additional).
+# swe-auto-eval's generate_results_json (main/secondary/additional). Reads
+# RUN_DIR — harbor's authoritative output, where reward.txt actually lands.
 # ---------------------------------------------------------------------------
 log_step "results"
-RUN_DIR="$LOGS_DIR/$JOB_ID"
 
 RESULTS_FILE="$RESULTS_FILE" RUN_DIR="$RUN_DIR" EVAL_RUN_ID="$EVAL_RUN_ID" \
 AGENT="$AGENT" MODEL="$MODEL" DATASET="$DATASET" ATTEMPTS="$ATTEMPTS" \
@@ -488,10 +588,12 @@ print('  total       :', s.get('total'))
 print('  solve_rate% :', s.get('solve_rate_pct'))
 " 2>/dev/null || true
 echo
-echo "Session logs (synced by the eval-runner as repo/logs/): $RUN_DIR/"
+SYNCED_RUN_DIR="$([ "$REDIRECTED_LOGS" = 1 ] && echo "$SYNC_LOGS_DIR/$JOB_ID" || echo "$RUN_DIR")"
+echo "Session logs (synced by the eval-runner as repo/logs/): $SYNCED_RUN_DIR/"
 echo "  <trial>/verifier/reward.txt       — score"
 echo "  <trial>/verifier/test-stdout.txt  — test output"
 echo "  <trial>/agent/                    — agent logs"
+[ "$REDIRECTED_LOGS" = 1 ] && echo "  (harbor wrote live to $RUN_DIR on the host-shared partition; mirrored to repo/logs post-run)"
 echo "Results JSON (synced as repo/output/, parsed by the runner): $RESULTS_FILE"
 
 # Exit 0 even if some tasks failed: the run COMPLETED and produced metrics.
