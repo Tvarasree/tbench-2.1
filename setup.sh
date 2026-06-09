@@ -303,15 +303,33 @@ setup_dataset() {
 }
 
 # ---------------------------------------------------------------------------
-# 9. xyne-cli binaries — pull straight from the npm registry.
+# 9. xyne-cli binaries — pulled from the npm registry as platform packages.
 #
-# As of @xyne/xyne-cli >= 0.1.1 the published tarball ships the linux binaries
-# (`binaries/xyne-linux-x64`, `binaries/xyne-linux-arm64`) and `package.json`
-# at the top level, so we no longer need the GCS mirror / per-binary sha256
-# side-cars. curl+tar only — no node/npm runtime dep on the Batch VM.
+# As of @xyne/xyne-cli >= 0.1.2 the main package's tarball NO LONGER ships
+# the prebuilt linux binaries. They live in per-platform sibling packages
+# (the esbuild / @swc/core pattern), declared as `optionalDependencies` on
+# the main package and version-locked to it:
+#
+#   @xyne/xyne-cli@X.Y.Z
+#     optionalDependencies:
+#       @xyne/xyne-cli-linux-x64   @ X.Y.Z   ← binary at package/xyne-linux-x64
+#       @xyne/xyne-cli-linux-arm64 @ X.Y.Z   ← binary at package/xyne-linux-arm64
+#       @xyne/xyne-cli-darwin-*    @ X.Y.Z
+#       @xyne/xyne-cli-win32-x64   @ X.Y.Z
+#
+# The binary sits at the **top of the sibling tarball** as
+# `package/xyne-linux-<arch>` (NOT under `binaries/`). The main package is
+# still where `package.json` comes from — `XyneCliAgent.install()` reads it
+# next to the binary, so we still need it locally.
+#
+# Steps below:
+#   1. Resolve the main package's `latest` version.
+#   2. For each desired platform, fetch `<pkg>-<plat>@<version>`, extract
+#      `package/xyne-<plat>` → `${LOCAL_DIR}/xyne-<plat>`.
+#   3. Fetch main package.json → `${LOCAL_DIR}/package.json`.
 # ---------------------------------------------------------------------------
 setup_xyne_binaries() {
-  header "xyne-cli binaries (from npm)"
+  header "xyne-cli binaries (platform packages from npm)"
 
   LOCAL_DIR="${SCRIPT_DIR}/binaries"
   PKG=$(python3 - "${SCRIPT_DIR}/config.yaml" <<'PY' 2>/dev/null || echo "@xyne/xyne-cli"
@@ -337,51 +355,74 @@ PY
   fi
   mkdir -p "${LOCAL_DIR}"
 
-  info "Resolving latest tarball for ${PKG} from the npm registry..."
-  TARBALL_URL=$(curl -fsSL "https://registry.npmjs.org/${PKG}/latest" 2>/dev/null \
-    | python3 -c 'import sys,json; print(json.load(sys.stdin)["dist"]["tarball"])' 2>/dev/null)
-  if [ -z "${TARBALL_URL}" ]; then
-    warn "Could not resolve ${PKG} tarball URL — xyne-cli agent will be unavailable"
+  # Resolve latest version of the main package — sibling packages are
+  # version-locked to it via optionalDependencies.
+  info "Resolving latest version of ${PKG} from npm…"
+  PKG_VERSION=$(curl -fsSL "https://registry.npmjs.org/${PKG}/latest" 2>/dev/null \
+    | python3 -c 'import sys,json; print(json.load(sys.stdin)["version"])' 2>/dev/null)
+  if [ -z "${PKG_VERSION}" ]; then
+    warn "Could not resolve ${PKG} latest version — xyne-cli agent will be unavailable"
     warn "(claude-code / opencode / pi / aider still work.)"
     return 0
   fi
+  ok "Latest ${PKG}: ${PKG_VERSION}"
 
-  TMP_DIR="$(mktemp -d)"
-  TMP_TAR="${TMP_DIR}/pkg.tgz"
-  info "Downloading ${TARBALL_URL}"
-  if ! curl -fsSL "${TARBALL_URL}" -o "${TMP_TAR}"; then
-    warn "Could not download xyne-cli tarball — xyne-cli agent will be unavailable"
-    rm -rf "${TMP_DIR}"; return 0
-  fi
-  if ! tar -xzf "${TMP_TAR}" -C "${TMP_DIR}"; then
-    warn "Failed to extract xyne-cli tarball — xyne-cli agent will be unavailable"
-    rm -rf "${TMP_DIR}"; return 0
-  fi
-
-  # npm tarballs have a `package/` top-level prefix.
-  SRC="${TMP_DIR}/package"
-  PKG_VERSION=$(python3 -c "import json; print(json.load(open('${SRC}/package.json'))['version'])" 2>/dev/null || echo "?")
+  # Fetch each linux platform sibling. URL-encode the '/' in the scoped name
+  # so curl talks to /<scope>%2F<pkg>/<version>.
   any=0
-  for f in xyne-linux-x64 xyne-linux-arm64; do
-    if [ -s "${SRC}/binaries/${f}" ]; then
-      cp "${SRC}/binaries/${f}" "${LOCAL_DIR}/${f}"
-      chmod +x "${LOCAL_DIR}/${f}"
-      ok "  -> ${LOCAL_DIR}/${f}"
-      any=1
-    else
-      warn "  ${f} missing from npm tarball — skipping"
+  for plat in linux-x64 linux-arm64; do
+    SIB="${PKG}-${plat}"
+    SIB_URL="https://registry.npmjs.org/${SIB//\//%2F}/${PKG_VERSION}"
+    SIB_TARBALL=$(curl -fsSL "${SIB_URL}" 2>/dev/null \
+      | python3 -c 'import sys,json; print(json.load(sys.stdin)["dist"]["tarball"])' 2>/dev/null)
+    if [ -z "${SIB_TARBALL}" ]; then
+      warn "  ${SIB}@${PKG_VERSION} not found on npm — skipping ${plat}"
+      continue
     fi
+
+    TMP_DIR="$(mktemp -d)"
+    TMP_TAR="${TMP_DIR}/sib.tgz"
+    info "Downloading ${SIB_TARBALL}"
+    if ! curl -fsSL "${SIB_TARBALL}" -o "${TMP_TAR}"; then
+      warn "  Failed to download ${SIB}@${PKG_VERSION} — skipping ${plat}"
+      rm -rf "${TMP_DIR}"; continue
+    fi
+    # Selective extract — sibling tarballs are 50-60 MB and we only want one file.
+    if ! tar -xzf "${TMP_TAR}" -C "${TMP_DIR}" "package/xyne-${plat}" 2>/dev/null; then
+      warn "  ${SIB}@${PKG_VERSION} tarball missing package/xyne-${plat} — skipping"
+      rm -rf "${TMP_DIR}"; continue
+    fi
+    cp "${TMP_DIR}/package/xyne-${plat}" "${LOCAL_DIR}/xyne-${plat}"
+    chmod +x "${LOCAL_DIR}/xyne-${plat}"
+    ok "  -> ${LOCAL_DIR}/xyne-${plat}"
+    any=1
+    rm -rf "${TMP_DIR}"
   done
-  if [ -s "${SRC}/package.json" ]; then
-    cp "${SRC}/package.json" "${LOCAL_DIR}/package.json"
-    ok "  -> ${LOCAL_DIR}/package.json"
+
+  # XyneCliAgent.install() requires package.json next to the binary; fetch it
+  # from the main package tarball (selective extract — we don't want the rest).
+  MAIN_TARBALL=$(curl -fsSL "https://registry.npmjs.org/${PKG//\//%2F}/${PKG_VERSION}" 2>/dev/null \
+    | python3 -c 'import sys,json; print(json.load(sys.stdin)["dist"]["tarball"])' 2>/dev/null)
+  if [ -n "${MAIN_TARBALL}" ]; then
+    TMP_DIR="$(mktemp -d)"
+    TMP_TAR="${TMP_DIR}/main.tgz"
+    info "Downloading ${MAIN_TARBALL} (for package.json)"
+    if curl -fsSL "${MAIN_TARBALL}" -o "${TMP_TAR}" \
+       && tar -xzf "${TMP_TAR}" -C "${TMP_DIR}" package/package.json 2>/dev/null; then
+      cp "${TMP_DIR}/package/package.json" "${LOCAL_DIR}/package.json"
+      ok "  -> ${LOCAL_DIR}/package.json"
+    else
+      warn "  Could not fetch main package.json for ${PKG}@${PKG_VERSION}"
+    fi
+    rm -rf "${TMP_DIR}"
+  else
+    warn "  Could not resolve main tarball URL for ${PKG}@${PKG_VERSION}"
   fi
-  rm -rf "${TMP_DIR}"
 
   if [ "${any}" = 1 ]; then
-    ok "xyne-cli binaries fetched from npm (${PKG}@${PKG_VERSION})"
+    ok "xyne-cli binaries fetched (${PKG}@${PKG_VERSION}, platform packages)"
   else
-    warn "No xyne-cli linux binaries in the tarball — only xyne-cli agent affected"
+    warn "No xyne-cli linux binaries fetched — only xyne-cli agent affected"
   fi
 }
 

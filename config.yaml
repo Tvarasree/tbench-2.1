@@ -117,12 +117,18 @@ dataset:
 # =============================================================================
 # XYNE-CLI BINARY (pulled from the npm registry on each VM)
 # =============================================================================
-# As of @xyne/xyne-cli >= 0.1.1 the published tarball ships the prebuilt linux
-# binaries (`binaries/xyne-linux-x64`, `binaries/xyne-linux-arm64`) and the
-# `package.json` at the top level. setup.sh resolves the latest tarball URL
-# from the npm registry, downloads it with curl, and extracts those files into
-# ./binaries — no GCS mirror, no node/npm runtime dependency on the VM. The
-# adapter then uploads the arch-correct binary into each task container.
+# As of @xyne/xyne-cli >= 0.1.2 the linux binaries live in per-platform sibling
+# packages (esbuild / @swc/core pattern), version-locked to the main package
+# via `optionalDependencies`:
+#
+#   @xyne/xyne-cli-linux-x64@<v>     → tarball has  package/xyne-linux-x64
+#   @xyne/xyne-cli-linux-arm64@<v>   → tarball has  package/xyne-linux-arm64
+#
+# setup.sh resolves the main package's latest version, then curls each sibling
+# tarball and extracts its top-level `package/xyne-linux-<arch>` into
+# `./binaries/xyne-linux-<arch>`. The main package's `package.json` is also
+# extracted into `./binaries/` (the adapter reads it next to the binary). No
+# GCS mirror, no node/npm runtime dependency on the VM.
 xyne_binary:
   local_dir: binaries                  # repo-relative; adapter's DEFAULT_BINARY_DIR
   npm_package: "@xyne/xyne-cli"        # resolved against https://registry.npmjs.org
