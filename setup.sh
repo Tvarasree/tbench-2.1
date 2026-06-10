@@ -246,27 +246,137 @@ setup_uv() {
 # ---------------------------------------------------------------------------
 # 6. harbor + xyne adapter (single isolated uv tool env).
 # ---------------------------------------------------------------------------
+# Pinned: the DooD patch below targets this version's internals (the
+# capabilities API it touches is stable, but pin anyway so a surprise harbor
+# release can't change trial behavior mid-flight). Bump deliberately.
+HARBOR_PIN="harbor==0.13.1"
+
 setup_harbor() {
   header "harbor + xyne adapter"
   export PATH="$HOME/.local/bin:$PATH"
 
   ADAPTER_DIR="${SCRIPT_DIR}/adapter"
   if [ -d "$ADAPTER_DIR" ]; then
-    info "Installing harbor with the xyne adapter editable in its env..."
-    if uv tool install harbor --with-editable "$ADAPTER_DIR" --reinstall; then
+    info "Installing ${HARBOR_PIN} with the xyne adapter editable in its env..."
+    if uv tool install "$HARBOR_PIN" --with-editable "$ADAPTER_DIR" --reinstall; then
       ok "harbor installed with xyne_harbor_agent available"
     else
       warn "harbor+adapter install failed; retrying harbor alone then injecting adapter"
-      uv tool install harbor --reinstall || die "harbor install failed"
+      uv tool install "$HARBOR_PIN" --reinstall || die "harbor install failed"
       uv tool run --from harbor python -m pip install -e "$ADAPTER_DIR" \
         || warn "Could not inject adapter — xyne-cli agent may be unavailable"
     fi
   else
     warn "adapter/ not found — installing harbor without xyne-cli support"
-    uv tool install harbor --reinstall || die "harbor install failed"
+    uv tool install "$HARBOR_PIN" --reinstall || die "harbor install failed"
   fi
   command_exists harbor && ok "harbor: $(harbor --version 2>/dev/null || echo installed)" \
     || die "harbor not on PATH after install"
+
+  patch_harbor_dood
+}
+
+# ---------------------------------------------------------------------------
+# 6b. DooD-safe transfer mode for harbor's docker environment.
+# ---------------------------------------------------------------------------
+# Harbor's DockerEnvironment hardcodes capabilities.mounted=True: it assumes
+# the trial dirs it bind-mounts into task containers are real host paths it
+# can read back (reward.txt, agent logs). Under the eval-runner's DooD that
+# assumption is false — the host daemon resolves bind-mount sources on the COS
+# host where the runner's work dir doesn't exist, so every read-back fails and
+# every trial is no-grade (proven by run.sh's dood-check probe, run 8240412a).
+#
+# Harbor already ships the fix for its cloud backends (Modal/E2B/GKE): when an
+# environment reports mounted=False, the verifier dir and agent logs are
+# fetched with `docker compose cp` — streamed over the docker socket exactly
+# like swe-bench's put/get_archive, which is why swe-auto-eval never hits this.
+#
+# We enable that existing mode via a .pth file in the harbor venv: site.py
+# executes a .pth's `import` line at interpreter start for every python using
+# that site-packages. (NOT sitecustomize.py — Debian ships its own at
+# /usr/lib/pythonX.Y/sitecustomize.py which shadows a venv-local one.) The
+# patch module is a no-op unless TB_HARBOR_UNMOUNTED=1, which run.sh exports
+# only when its dood-check probe proves bind-mounts don't resolve —
+# native/manual VM runs are untouched.
+patch_harbor_dood() {
+  header "harbor DooD transfer-mode patch"
+
+  local harbor_bin venv_dir site_pkgs
+  harbor_bin="$(readlink -f "$(command -v harbor)" 2>/dev/null)" \
+    || { warn "Cannot resolve harbor binary path — skipping DooD patch (Batch runs will no-grade)"; return 0; }
+  venv_dir="${harbor_bin%/bin/harbor}"
+  site_pkgs="$("${venv_dir}/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])' 2>/dev/null)"
+  if [ -z "$site_pkgs" ] || [ ! -d "$site_pkgs" ]; then
+    warn "Cannot locate harbor venv site-packages — skipping DooD patch (Batch runs will no-grade)"
+    return 0
+  fi
+
+  cat > "${site_pkgs}/_tb_harbor_dood.py" <<'PYEOF'
+"""terminal-bench-v2-agentic: opt-in DooD-safe transfer mode for harbor.
+
+Imported at interpreter start via tb_harbor_dood.pth. Active ONLY when
+TB_HARBOR_UNMOUNTED=1 (exported by run.sh after its dood-check probe proves
+daemon bind-mounts don't resolve to local paths). Flips
+DockerEnvironment.capabilities.mounted to False so harbor uses its built-in
+`docker compose cp` download/upload paths (the same code path its cloud
+backends use) instead of reading bind-mounted trial dirs.
+
+Installed by setup.sh (patch_harbor_dood). Delete both files to disable:
+  site-packages/tb_harbor_dood.pth
+  site-packages/_tb_harbor_dood.py
+"""
+
+import os
+import sys
+
+if os.environ.get("TB_HARBOR_UNMOUNTED") == "1":
+    try:
+        from harbor.environments.docker.docker import DockerEnvironment
+
+        _orig_caps = DockerEnvironment.capabilities.fget
+
+        def _unmounted_capabilities(self):
+            return _orig_caps(self).model_copy(update={"mounted": False})
+
+        DockerEnvironment.capabilities = property(_unmounted_capabilities)
+        print(
+            "[tb-harbor-patch] DockerEnvironment.capabilities.mounted=False "
+            "(TB_HARBOR_UNMOUNTED=1): verifier/agent logs via docker compose cp",
+            file=sys.stderr,
+        )
+    except Exception as exc:  # noqa: BLE001 — must never break interpreter start
+        print(
+            f"[tb-harbor-patch] FAILED to apply unmounted patch: {exc!r} — "
+            "DooD runs will be no-grade",
+            file=sys.stderr,
+        )
+PYEOF
+  echo "import _tb_harbor_dood" > "${site_pkgs}/tb_harbor_dood.pth"
+  ok "patch installed -> ${site_pkgs}/{_tb_harbor_dood.py,tb_harbor_dood.pth}"
+
+  # Prove the patch actually engages: with the env var set, the capabilities
+  # property must be our wrapper; without it, harbor must be untouched.
+  if TB_HARBOR_UNMOUNTED=1 "${venv_dir}/bin/python" - <<'PYEOF'
+from harbor.environments.docker.docker import DockerEnvironment
+fn = DockerEnvironment.capabilities.fget
+assert fn.__name__ == "_unmounted_capabilities", f"patch not active: {fn.__qualname__}"
+PYEOF
+  then
+    ok "verified: TB_HARBOR_UNMOUNTED=1 flips harbor to non-mounted (docker compose cp) mode"
+  else
+    warn "verification FAILED — patch present but not engaging; DooD runs will no-grade"
+  fi
+
+  if "${venv_dir}/bin/python" - <<'PYEOF'
+from harbor.environments.docker.docker import DockerEnvironment
+fn = DockerEnvironment.capabilities.fget
+assert fn.__name__ != "_unmounted_capabilities", "patch active without TB_HARBOR_UNMOUNTED"
+PYEOF
+  then
+    ok "verified: without TB_HARBOR_UNMOUNTED harbor behavior is unchanged (mounted mode)"
+  else
+    warn "verification FAILED — patch active even without TB_HARBOR_UNMOUNTED (native runs affected)"
+  fi
 }
 
 # ---------------------------------------------------------------------------

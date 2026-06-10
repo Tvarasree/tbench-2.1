@@ -311,44 +311,38 @@ TS="$(date +%Y-%m-%d__%H-%M-%S)"
 JOB_ID="${EVAL_RUN_ID}__${AGENT//\//_}__${MODEL//\//_}__${TS}"
 
 # ---------------------------------------------------------------------------
-# DooD-safe harbor jobs-dir.
+# DooD detection → harbor transfer mode.
 # ---------------------------------------------------------------------------
-# Harbor bind-mounts each trial dir into the task container as /logs — that is
-# how the agent transcript and verifier/reward.txt get out of the container.
-# Under DooD the *host* daemon resolves that bind-mount SOURCE against the HOST
-# filesystem. The eval-runner's work dir (/tmp/eval-runner/<id>/repo/logs) is
-# container-local: no such path exists on the COS host, so Docker silently
-# mounts an EMPTY dir, the verifier writes reward.txt into that orphan, harbor
-# can't find it, and EVERY trial becomes no-grade (reproduces across xyne-cli
-# AND claude-code — agent-independent, which is the tell that it's the mount).
+# Harbor's docker environment normally bind-mounts each trial dir into the task
+# container as /logs (that's how the agent transcript and verifier/reward.txt
+# get out). Under DooD the *host* daemon resolves the bind-mount SOURCE on the
+# HOST filesystem; the eval-runner's work dir is container-local, so the daemon
+# mounts an empty orphan, reward.txt lands in the orphan, and every trial goes
+# no-grade. swe-auto-eval never hits this because nothing in its stack relies
+# on host paths — everything streams through the docker API.
 #
-# /var/lib/docker is the writable host-backed partition (the same one setup.sh
-# installs gcloud into), so it exists identically on host and container and
-# harbor's bind mounts resolve there. We point harbor at it and then mirror the
-# job tree back into repo/logs so log_sync still uploads it. On a native/manual
-# host run, run.sh executes on the host directly — repo/logs is already a real
-# host path — so no redirect is needed (and none happens if /var/lib/docker is
-# absent, e.g. Docker Desktop on macOS).
-if [ -d /var/lib/docker ] && [ -w /var/lib/docker ] && mkdir -p /var/lib/docker/tb-harbor-logs 2>/dev/null; then
-  HARBOR_JOBS_DIR="/var/lib/docker/tb-harbor-logs"
-  REDIRECTED_LOGS=1
-else
-  HARBOR_JOBS_DIR="$SYNC_LOGS_DIR"
-  REDIRECTED_LOGS=0
-fi
+# Harbor has the same DooD-safe mode built in: when an environment reports
+# capabilities.mounted=False (as its cloud backends do), harbor fetches the
+# verifier dir and agent logs with `docker compose cp` over the socket instead
+# of reading bind-mounted paths. setup.sh installs a sitecustomize.py into the
+# harbor venv that flips DockerEnvironment to that mode when
+# TB_HARBOR_UNMOUNTED=1. Here we probe whether bind-mounts actually resolve
+# (HOST-SHARED) and set the variable only when they don't, so native/manual
+# VM runs keep today's mounted behavior bit-for-bit.
+HARBOR_JOBS_DIR="$SYNC_LOGS_DIR"
 RUN_DIR="$HARBOR_JOBS_DIR/$JOB_ID"
 
 log_step "jobs-dir / DooD visibility"
 echo "    DOCKER_HOST:     ${DOCKER_HOST:-<unset>}"
 echo "    docker server:   $(timeout 10 docker version --format '{{.Server.Version}}' 2>/dev/null || echo '<unreachable>')"
-echo "    sync logs dir:   $SYNC_LOGS_DIR   (uploaded to object storage by the eval-runner)"
-echo "    harbor jobs-dir: $HARBOR_JOBS_DIR  $([ "$REDIRECTED_LOGS" = 1 ] && echo '(redirected to host-shared partition for DooD)' || echo '(host-native; no redirect)')"
+echo "    harbor jobs-dir: $HARBOR_JOBS_DIR   (== repo/logs, uploaded to object storage by the eval-runner)"
 echo "    run dir:         $RUN_DIR"
 
-# Verify the chosen jobs-dir is genuinely shared with the host daemon. This is
-# the exact failure mode behind the no-grade bug, so surface it loudly in the
-# run.sh log instead of discovering it only via empty reward files. Non-fatal:
-# the run proceeds either way, but the verdict is logged unambiguously.
+# Probe whether a daemon-launched container's bind-mounted write is visible to
+# run.sh. Sets DOOD_ORPHAN: 1 = orphan (DooD, paths NOT shared), 0 = shared,
+# "" = probe inconclusive. Non-fatal either way; the verdict drives the harbor
+# transfer mode below and is logged unambiguously.
+DOOD_ORPHAN=""
 dood_shared_check() {
   local d="$1" img="" cand marker=".dood_probe_$$_${RANDOM}"
   command -v docker >/dev/null 2>&1 || { log_warn "[dood-check] docker CLI unavailable — skipping shared-path probe"; return; }
@@ -358,23 +352,38 @@ dood_shared_check() {
     if docker image inspect "$cand" >/dev/null 2>&1; then img="$cand"; break; fi
   done
   if [ -z "$img" ]; then
-    log_warn "[dood-check] no local image available to probe with — skipping (run continues; watch for no-grade)"
+    log_warn "[dood-check] no local image available to probe with — verdict falls back to /.dockerenv heuristic"
     return
   fi
   mkdir -p "$d" 2>/dev/null
   if timeout 90 docker run --rm --entrypoint sh -v "$d:/probe" "$img" -c "echo shared > /probe/$marker" >/dev/null 2>&1; then
     if [ -f "$d/$marker" ]; then
-      log_ok "[dood-check] '$d' is HOST-SHARED (a daemon-launched container's write is visible here) → harbor bind-mounts will resolve; reward.txt WILL be captured."
+      DOOD_ORPHAN=0
+      log_ok "[dood-check] '$d' is HOST-SHARED → harbor bind-mounts resolve; keeping harbor's default mounted mode."
     else
-      log_err "[dood-check] '$d' is NOT host-shared (DooD orphan): a daemon-launched container wrote into it but the file is invisible to run.sh."
-      log_err "[dood-check] => trials will be no-grade. jobs-dir must be a path that exists identically on the COS host (add a hostPath bind-mount in the scheduler; still DooD, not DinD)."
+      DOOD_ORPHAN=1
+      log_warn "[dood-check] '$d' is NOT host-shared (DooD orphan): a daemon-launched container wrote into it but the file is invisible to run.sh."
     fi
     rm -f "$d/$marker" 2>/dev/null
   else
-    log_warn "[dood-check] probe container failed to run (img=$img) — skipping shared-path verification (run continues)."
+    log_warn "[dood-check] probe container failed to run (img=$img) — verdict falls back to /.dockerenv heuristic"
   fi
 }
 dood_shared_check "$HARBOR_JOBS_DIR"
+
+# Inconclusive probe: if we're inside a container but talking to an outside
+# daemon, that IS DooD — choose the safe mode. Plain VM: keep mounted mode.
+if [ -z "$DOOD_ORPHAN" ]; then
+  [ -f /.dockerenv ] && DOOD_ORPHAN=1 || DOOD_ORPHAN=0
+  log_warn "[dood-check] probe inconclusive; /.dockerenv heuristic says DooD_orphan=$DOOD_ORPHAN"
+fi
+
+if [ "$DOOD_ORPHAN" = 1 ]; then
+  export TB_HARBOR_UNMOUNTED=1
+  log_ok "[dood-check] => TB_HARBOR_UNMOUNTED=1: harbor will fetch verifier/agent logs via 'docker compose cp' (socket-streamed, DooD-safe) instead of bind-mount reads."
+else
+  log_ok "[dood-check] => mounted mode (default): trial dirs are real host paths here."
+fi
 
 INCLUDE_FLAGS=()
 for task in "${SELECTED[@]}"; do
@@ -461,16 +470,6 @@ if [ -d "$RUN_DIR" ]; then
   shopt -u nullglob
 else
   log_warn "    run dir does not exist: $RUN_DIR (harbor produced no job tree)"
-fi
-
-# Mirror the harbor job tree into the synced repo/logs path so the eval-runner's
-# log_sync uploads it (harbor wrote to the host-shared partition, outside repo/).
-if [ "$REDIRECTED_LOGS" = 1 ] && [ -d "$RUN_DIR" ]; then
-  if cp -a "$RUN_DIR" "$SYNC_LOGS_DIR/" 2>/dev/null; then
-    log_ok "Mirrored harbor job tree -> $SYNC_LOGS_DIR/$JOB_ID (for log-sync / artifacts)"
-  else
-    log_warn "Could not mirror harbor job tree into $SYNC_LOGS_DIR — session logs may not reach object storage"
-  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -588,12 +587,11 @@ print('  total       :', s.get('total'))
 print('  solve_rate% :', s.get('solve_rate_pct'))
 " 2>/dev/null || true
 echo
-SYNCED_RUN_DIR="$([ "$REDIRECTED_LOGS" = 1 ] && echo "$SYNC_LOGS_DIR/$JOB_ID" || echo "$RUN_DIR")"
-echo "Session logs (synced by the eval-runner as repo/logs/): $SYNCED_RUN_DIR/"
+echo "Session logs (synced by the eval-runner as repo/logs/): $RUN_DIR/"
 echo "  <trial>/verifier/reward.txt       — score"
 echo "  <trial>/verifier/test-stdout.txt  — test output"
 echo "  <trial>/agent/                    — agent logs"
-[ "$REDIRECTED_LOGS" = 1 ] && echo "  (harbor wrote live to $RUN_DIR on the host-shared partition; mirrored to repo/logs post-run)"
+[ "${TB_HARBOR_UNMOUNTED:-}" = 1 ] && echo "  (DooD: harbor fetched these via 'docker compose cp' — TB_HARBOR_UNMOUNTED=1)"
 echo "Results JSON (synced as repo/output/, parsed by the runner): $RESULTS_FILE"
 
 # Exit 0 even if some tasks failed: the run COMPLETED and produced metrics.
