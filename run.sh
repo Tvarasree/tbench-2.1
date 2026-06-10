@@ -425,9 +425,55 @@ TIMEOUT_FLAGS=()
 [ -n "$AGENT_TIMEOUT_MULT" ] && TIMEOUT_FLAGS+=(--agent-timeout-multiplier "$AGENT_TIMEOUT_MULT")
 
 # ---------------------------------------------------------------------------
+# Heartbeat: harbor's rich progress display goes silent when stdout is not a
+# TTY, so on the dashboard the log is dark for the whole run. Poll the run dir
+# and log STATE TRANSITIONS only — one line when a trial starts, one when it
+# finishes (with its reward) — plus a one-line progress summary every 5 min.
+# A trial is "finished" when harbor writes its result.json; the reward comes
+# from verifier/reward.txt (present under both mounted and unmounted modes by
+# the time result.json lands). Volume stays readable at any scale: 2 lines per
+# trial + ~12 summary lines/hour, never a refresh flood.
+# ---------------------------------------------------------------------------
+EXPECTED_TRIALS=$((N_SEL * ATTEMPTS))
+heartbeat() {
+  local interval=30 summary_every=10 tick=0
+  local t name state reward done_n run_n now
+  local -A seen
+  while :; do
+    sleep "$interval" || return 0
+    tick=$((tick + 1))
+    done_n=0; run_n=0
+    now="$(date +%H:%M:%S)"
+    for t in "$RUN_DIR"/*/; do
+      [ -d "$t" ] || continue
+      name="$(basename "$t")"
+      if [ -f "${t}result.json" ]; then
+        state="done"; done_n=$((done_n + 1))
+      else
+        state="running"; run_n=$((run_n + 1))
+      fi
+      if [ "${seen[$name]:-}" != "$state" ]; then
+        if [ "$state" = "done" ]; then
+          reward=""
+          [ -f "${t}verifier/reward.txt" ] && reward="$(tr -d '\n' < "${t}verifier/reward.txt" 2>/dev/null)"
+          echo "    [hb ${now}] ${name}: finished  reward=${reward:-<none>}"
+        else
+          echo "    [hb ${now}] ${name}: started"
+        fi
+        seen[$name]="$state"
+      fi
+    done
+    if [ $((tick % summary_every)) -eq 0 ]; then
+      echo "    [hb ${now}] progress: ${done_n}/${EXPECTED_TRIALS} done, ${run_n} running, elapsed $((tick * interval / 60))m"
+    fi
+  done
+}
+
+# ---------------------------------------------------------------------------
 # harbor run (failure is captured, NOT fatal — we still write results).
 # ---------------------------------------------------------------------------
 log_step "harbor run (job: $JOB_ID)"
+heartbeat & HB_PID=$!
 HARBOR_RC=0
 harbor run \
   "${AGENT_FLAGS[@]}" \
@@ -442,6 +488,7 @@ harbor run \
   "${TIMEOUT_FLAGS[@]}" \
   "${EXTRA_HARBOR_FLAGS[@]}" \
   --yes || HARBOR_RC=$?
+kill "$HB_PID" 2>/dev/null; wait "$HB_PID" 2>/dev/null
 [ "$HARBOR_RC" -eq 0 ] && log_ok "harbor run finished" \
   || log_warn "harbor run exited $HARBOR_RC — aggregating whatever graded"
 
