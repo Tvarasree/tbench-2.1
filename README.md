@@ -18,7 +18,7 @@ as `swe-auto-eval`**, so it drops into the existing eval dashboard pipeline.
 | Harness | `harbor` CLI, installed as an isolated `uv tool` |
 | Dataset | `terminal-bench/terminal-bench-2-1` (89 tasks) cached under `~/.cache/harbor` |
 | Task images | Each `task.toml` declares `[environment].docker_image`. We mirror all 89 into **Google Artifact Registry** once, and pull from GAR every run (no Docker Hub at run time). |
-| Custom agent | `xyne_harbor_agent.agent:XyneCliAgent` — uploads the prebuilt `xyne-linux-{arch}` binary into the task container and runs `xyne prompt` |
+| Custom agent | `xyne_harbor_agent.agent:XyneCliAgent` — uploads the prebuilt `xyne-linux-{arch}` binary into the task container and runs `xyne prompt --yolo`. `--yolo` is mandatory: headless `xyne prompt` has no interactive approver, so without it every mutating tool call stalls at the permission gate and no task can be solved. |
 | Other agents | harbor built-ins: `claude-code`, `opencode`, `pi`, `aider`, `goose`, `codex` |
 | Models | grid.ai (juspay), default `private-large`; self-hosted/open-weights for the PoC sweep |
 | Config | `config.yaml` — single source of truth (models, agents, GAR, GCS, defaults) |
@@ -138,6 +138,56 @@ inclusive), `--limit N`, `--all`. Unknown `--flags` are forwarded to
 
 ---
 
+## Token usage & cost
+
+Every run writes `token_usage.{json,csv,md}` into the results dir (synced as
+`repo/output/`), plus `token_usage.html` when prices were supplied. A headline
+also lands in `metrics.additional.token_usage`, so the run page shows totals
+without opening artifacts.
+
+```bash
+./run.sh my-run-id --all --price-input 3 --price-output 15 --price-cached 0.3
+```
+
+All three are **USD per 1,000,000 tokens** and optional:
+
+* `--price-input` and `--price-output` are both required to price a run. One
+  alone leaves it unpriced *with a stated reason* — a half-priced total is
+  worse than no total.
+* `--price-cached` is optional on top. Given, cache tokens bill at that rate
+  and the remainder at the input rate; omitted, all input (including cache
+  reads) bills at the input rate, which overstates cost when caching is active.
+* Unpriced runs still report exact token counts, and harbor's as-billed
+  `cost_usd` is emitted either way.
+
+The report is built from harbor's own per-trial `result.json`
+(`agent_result` → `AgentContext`), joined to `verifier/reward.txt` for the
+outcome. The row is one **trial** = one attempt; retries join on the task. It
+reports totals, the solved-vs-unsolved split (compare the *per-attempt
+averages*, not the bucket totals), cost per solve both winning-attempt-only and
+including failed retries, wasted spend, and per-attempt-round cost-per-solve.
+
+**Coverage is a first-class output.** Not every agent reports tokens: in harbor
+0.13.1 `claude-code`, `codex`, `opencode`, `pi` and `goose` do, **`aider` does
+not**, and `xyne-cli` does via the adapter's `populate_context_post_run`, which
+sums its session transcript. Any total taken at < 100% coverage is a lower
+bound and is labelled as one.
+
+> **Known limit.** xyne's session JSONL has no terminal summary record, so the
+> adapter sums per-message `usage` — the same way xyne computes its own totals.
+> Subagent turns are only counted if pi persisted them into that session file.
+> Reconcile against a finished run before trusting absolute xyne-cli numbers.
+
+Reporting is non-fatal and standalone-runnable over a finished job:
+
+```bash
+python3 analysis/token_usage.py --run-dir logs/<job-id> --out-dir /tmp/report \
+  --price-input 3 --price-output 15
+python3 -m unittest discover -s analysis -p 'test_*.py'   # 28 tests, stdlib only
+```
+
+---
+
 ## Repo layout
 
 ```
@@ -145,9 +195,16 @@ terminal-bench/
 ├── config.yaml                 # single source of truth
 ├── setup.sh                    # Batch-VM provisioning (idempotent)
 ├── run.sh                      # eval-runner-contract entrypoint + results
+├── input_params.json           # reference copy of the dashboard's run form
 ├── requirements.txt            # helper-script deps (PyYAML)
-├── adapter/                    # the xyne-cli harbor agent (unchanged)
-│   └── xyne_harbor_agent/agent.py
+├── adapter/                    # the xyne-cli harbor agent
+│   └── xyne_harbor_agent/
+│       ├── agent.py            # install + `xyne prompt --yolo` + token capture
+│       └── session_usage.py    # session-JSONL parser (harbor-free, unit-tested)
+├── analysis/
+│   ├── token_usage.py          # per-run token & cost report (stdlib only)
+│   ├── test_token_usage.py     # 28 tests over synthetic trial trees
+│   └── report.py               # manual pass/fail taxonomy report (not run by run.sh)
 ├── scripts/
 │   ├── seed_gar_images.py      # ONE-TIME: task images → GAR (digest-verified)
 │   ├── make_dataset_tarball.sh # ONE-TIME: ~/.cache/harbor/tasks → GCS
@@ -168,5 +225,9 @@ terminal-bench/
 * **harbor prebuilt hook:** `docker-compose-prebuilt.yaml` has no
   `pull_policy`, so Compose default `missing` reuses a locally-present image —
   that's why retagging the GAR image to the `task.toml` name works.
-* **Adapter unchanged:** all Batch wiring lives in `setup.sh` / `run.sh` /
-  `scripts/`; the proven `xyne_harbor_agent` is untouched.
+* **Adapter surface is deliberately small:** all Batch wiring lives in
+  `setup.sh` / `run.sh` / `scripts/`. `xyne_harbor_agent` owns only two things
+  beyond install/run — the `--yolo` flag (see above) and
+  `populate_context_post_run`, which fills harbor's token fields from the
+  session transcript so `xyne-cli` appears in the cost report like every
+  built-in agent.

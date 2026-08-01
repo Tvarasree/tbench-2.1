@@ -79,6 +79,13 @@ Model & agent:
   --concurrency N        harbor --n-concurrent (default: 1)
   --attempts N           harbor --n-attempts / pass@k (default: 3)
 
+Token pricing (all USD per 1,000,000 tokens; optional):
+  --price-input RATE     Input-token rate. Both input and output are required
+                         for a priced report; one alone leaves it unpriced.
+  --price-output RATE    Output-token rate.
+  --price-cached RATE    Cached-read rate. Omit and cache reads bill at the
+                         input rate (overstates cost when caching is active).
+
 Misc:
   --agent-timeout MULT   Scale per-task agent timeout (harbor multiplier)
   --dataset NAME         Harbor dataset (default: terminal-bench/terminal-bench-2-1)
@@ -122,6 +129,11 @@ TASK_SELECTOR=""
 SELECTOR_KIND="task"
 USE_GAR=1
 LOG_LEVEL="info"
+# Token pricing, USD per 1,000,000 tokens. Empty = not supplied. Kept as
+# strings so "unset" stays distinguishable from a deliberate 0.
+PRICE_INPUT=""
+PRICE_OUTPUT=""
+PRICE_CACHED=""
 
 # ---------------------------------------------------------------------------
 # Named-flag parser. Known flags → vars; unknown → forwarded to harbor as-is
@@ -142,6 +154,9 @@ while [ $# -gt 0 ]; do
     --dataset)         DATASET="$2";            shift 2 ;;
     --agent-timeout)   AGENT_TIMEOUT_MULT="$2"; shift 2 ;;
     --no-gar)          USE_GAR=0;               shift   ;;
+    --price-input)     PRICE_INPUT="$2";        shift 2 ;;
+    --price-output)    PRICE_OUTPUT="$2";       shift 2 ;;
+    --price-cached)    PRICE_CACHED="$2";       shift 2 ;;
     --log-level)       LOG_LEVEL="$2";          shift 2 ;;   # schema parity
     --help|-h)         print_usage; exit 0 ;;
     --*)
@@ -278,6 +293,9 @@ echo "    attempts:    $ATTEMPTS"
 echo "    agent-timeout: $([ -n "$AGENT_TIMEOUT_MULT" ] && echo "${AGENT_TIMEOUT_MULT}x (harbor --agent-timeout-multiplier)" || echo "1.0x (each task's task.toml default)")"
 echo "    base-url:    $BASE_URL"
 echo "    gar pre-pull: $([ "$USE_GAR" = 1 ] && echo yes || echo no)"
+echo "    pricing:     $( [ -n "$PRICE_INPUT" ] && [ -n "$PRICE_OUTPUT" ] \
+  && echo "in=\$${PRICE_INPUT} out=\$${PRICE_OUTPUT} cached=\$${PRICE_CACHED:-<input rate>} per 1M tokens" \
+  || echo "none (token counts reported unpriced)")"
 echo "    output:      $RESULTS_FILE"
 
 # ---------------------------------------------------------------------------
@@ -525,9 +543,37 @@ fi
 # swe-auto-eval's generate_results_json (main/secondary/additional). Reads
 # RUN_DIR — harbor's authoritative output, where reward.txt actually lands.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Token usage & cost. Reads harbor's per-trial result.json (agent_result) plus
+# verifier/reward.txt and writes token_usage.{json,csv,md} into OUTPUT_DIR —
+# and .html when prices were supplied. Runs BEFORE the results aggregator so
+# that aggregator can fold a headline into metrics.additional in one write.
+#
+# Strictly non-fatal: an accounting failure must never cost us a graded run.
+# ---------------------------------------------------------------------------
+log_step "token usage"
+TOKEN_USAGE_JSON="${OUTPUT_DIR}/token_usage.json"
+TOKEN_PRICE_FLAGS=()
+[ -n "$PRICE_INPUT" ]  && TOKEN_PRICE_FLAGS+=(--price-input  "$PRICE_INPUT")
+[ -n "$PRICE_OUTPUT" ] && TOKEN_PRICE_FLAGS+=(--price-output "$PRICE_OUTPUT")
+[ -n "$PRICE_CACHED" ] && TOKEN_PRICE_FLAGS+=(--price-cached "$PRICE_CACHED")
+if [ ${#TOKEN_PRICE_FLAGS[@]} -eq 0 ]; then
+  log_info "no --price-* supplied; token counts will be reported unpriced"
+fi
+python3 "${SCRIPT_DIR}/analysis/token_usage.py" \
+  --run-dir "$RUN_DIR" \
+  --out-dir "$OUTPUT_DIR" \
+  --eval-run-id "$EVAL_RUN_ID" \
+  --agent "$AGENT" \
+  --model "$MODEL" \
+  --attempts "$ATTEMPTS" \
+  "${TOKEN_PRICE_FLAGS[@]}" \
+  || log_warn "token-usage reporting failed (non-fatal) — the run still counts"
+
 log_step "results"
 
 RESULTS_FILE="$RESULTS_FILE" RUN_DIR="$RUN_DIR" EVAL_RUN_ID="$EVAL_RUN_ID" \
+TOKEN_USAGE_JSON="$TOKEN_USAGE_JSON" \
 AGENT="$AGENT" MODEL="$MODEL" DATASET="$DATASET" ATTEMPTS="$ATTEMPTS" \
 N_SEL="$N_SEL" HARBOR_RC="$HARBOR_RC" python3 - <<'PYEOF'
 import json, os, glob
@@ -553,6 +599,49 @@ for trial in sorted(glob.glob(os.path.join(run_dir, "*/"))):
                 rec["passed"] += 1
         except Exception:
             pass
+
+def token_usage_headline():
+    """Flat headline from token_usage.json, or a reason it is absent.
+
+    Kept defensive and side-effect free: the results file must be written even
+    if the token reporter crashed, wrote nothing, or produced a shape we don't
+    recognise.
+    """
+    path = os.environ.get("TOKEN_USAGE_JSON", "")
+    if not path or not os.path.isfile(path):
+        return {"status": "unavailable", "reason": "token_usage.json not written"}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        agg = data["aggregates"]
+        cov, tot = agg["coverage"], agg["totals"]
+        cps, waste = agg["cost_per_success"], agg["waste"]
+        return {
+            "status": "ok",
+            "priced": data["meta"].get("priced", False),
+            # Only per-run record of which unpinned @xyne/xyne-cli build ran.
+            "agent_versions": data["meta"].get("agent_versions", []),
+            "pricing_note": data["meta"].get("pricing_note", ""),
+            "measured_attempts": cov["measured_attempts"],
+            "total_attempts": cov["total_attempts"],
+            "measured_pct": cov["measured_pct"],
+            "coverage_note": cov["note"],
+            "n_input_tokens": tot["n_input_tokens"],
+            "n_cache_tokens": tot["n_cache_tokens"],
+            "n_output_tokens": tot["n_output_tokens"],
+            "n_total_tokens": tot["n_total_tokens"],
+            "cost_usd_billed": tot["cost_usd_billed"] or None,
+            "cost_usd_priced": tot["cost_usd_priced"] or None,
+            "cost_usd_per_solve_including_failed_retries":
+                cps["cost_usd_per_solve_including_failed_retries"],
+            "cost_usd_per_solve_winning_attempt_only":
+                cps["cost_usd_per_solve_winning_attempt_only"],
+            "cost_usd_wasted": waste["cost_usd_wasted"],
+            "wasted_pct": waste["wasted_pct"],
+        }
+    except Exception as exc:  # noqa: BLE001 — never block the results write
+        return {"status": "unreadable", "reason": repr(exc)}
+
 
 solved = sorted(t for t, r in tasks.items() if r["passed"] >= 1)
 graded_tasks = [t for t, r in tasks.items() if r["graded"] >= 1]
@@ -581,6 +670,7 @@ results = {
             "dataset": os.environ.get("DATASET", ""),
             "attempts_per_task": attempts,
             "harbor_exit_code": int(os.environ.get("HARBOR_RC", "0") or 0),
+            "token_usage": token_usage_headline(),
             "solved_tasks": solved,
             "unsolved_tasks": unsolved,
             "no_grade_tasks": nograde,
@@ -640,6 +730,9 @@ echo "  <trial>/verifier/test-stdout.txt  — test output"
 echo "  <trial>/agent/                    — agent logs"
 [ "${TB_HARBOR_UNMOUNTED:-}" = 1 ] && echo "  (DooD: harbor fetched these via 'docker compose cp' — TB_HARBOR_UNMOUNTED=1)"
 echo "Results JSON (synced as repo/output/, parsed by the runner): $RESULTS_FILE"
+echo "Token usage (synced as repo/output/): ${OUTPUT_DIR}/token_usage.{json,csv,md}"
+[ -f "${OUTPUT_DIR}/token_usage.html" ] && \
+  echo "  priced report: ${OUTPUT_DIR}/token_usage.html"
 
 # Exit 0 even if some tasks failed: the run COMPLETED and produced metrics.
 # Only a missing results file (handled above) is a real failure for the harness.

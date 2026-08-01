@@ -1,0 +1,110 @@
+{
+  "_comment": [
+    "Reference copy of the dashboard's input-params schema for this eval.",
+    "The AUTHORITATIVE copy is the evals.input_params column in the dashboard",
+    "database — this file is documentation. Keep the two in sync.",
+    "The eval-runner translates each field name '_' -> '-' and passes it to",
+    "run.sh as a named flag, so 'price_input' arrives as '--price-input'.",
+    "Price fields are OPTIONAL and are USD per 1,000,000 tokens. Leave them at",
+    "0 to get an unpriced report (token counts are still exact). Both input and",
+    "output must be non-zero for pricing to engage; one alone is never",
+    "half-applied. price_cached is optional on top: omit it and cache reads bill",
+    "at the input rate, which overstates cost when caching is active."
+  ],
+  "fields": [
+    {
+      "default": "private-large",
+      "label": "Model",
+      "name": "model",
+      "required": true,
+      "type": "text"
+    },
+    {
+      "default": "xyne-cli",
+      "label": "Coding Agent",
+      "name": "coding_agent",
+      "options": [
+        "xyne-cli",
+        "claude-code",
+        "opencode",
+        "pi",
+        "aider",
+        "goose",
+        "codex"
+      ],
+      "required": true,
+      "type": "text"
+    },
+    {
+      "constraints": {
+        "max": 16,
+        "min": 1
+      },
+      "default": 4,
+      "label": "Concurrency",
+      "name": "concurrency",
+      "type": "number"
+    },
+    {
+      "constraints": {
+        "max": 5,
+        "min": 1
+      },
+      "default": 3,
+      "label": "Attempts (pass@k)",
+      "name": "attempts",
+      "type": "number"
+    },
+    {
+      "constraints": {
+        "max": 5,
+        "min": 1
+      },
+      "default": 1,
+      "label": "Agent Timeout Multiplier",
+      "name": "agent_timeout",
+      "type": "number"
+    },
+    {
+      "default": "0-88",
+      "label": "Task Range",
+      "name": "range",
+      "pattern": "^[0-9]+-[0-9]+$",
+      "required": false,
+      "type": "text"
+    },
+    {
+      "constraints": {
+        "max": 1000,
+        "min": 0
+      },
+      "default": 0,
+      "label": "Input price (USD / 1M tokens)",
+      "name": "price_input",
+      "required": false,
+      "type": "number"
+    },
+    {
+      "constraints": {
+        "max": 1000,
+        "min": 0
+      },
+      "default": 0,
+      "label": "Output price (USD / 1M tokens)",
+      "name": "price_output",
+      "required": false,
+      "type": "number"
+    },
+    {
+      "constraints": {
+        "max": 1000,
+        "min": 0
+      },
+      "default": 0,
+      "label": "Cached-read price (USD / 1M tokens)",
+      "name": "price_cached",
+      "required": false,
+      "type": "number"
+    }
+  ]
+}

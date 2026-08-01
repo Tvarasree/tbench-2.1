@@ -16,6 +16,8 @@ from harbor.agents.installed.base import BaseInstalledAgent, with_prompt_templat
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
+from xyne_harbor_agent.session_usage import sum_session_usage, to_harbor_fields
+
 
 DEFAULT_BINARY_DIR = (
     Path(__file__).resolve().parents[2] / "binaries"
@@ -57,9 +59,41 @@ class XyneCliAgent(BaseInstalledAgent):
         return "xyne --version"
 
     def populate_context_post_run(self, context: AgentContext) -> None:
-        # xyne-cli doesn't emit a token-count trajectory file we can parse yet.
-        # Leave token counts unset; harbor will record run/pass status either way.
-        pass
+        """Fill harbor's token/cost fields from xyne's session transcript.
+
+        `install()` symlinks the container's /root/.xyne/agent/sessions into
+        /logs/agent/sessions, and harbor downloads the agent dir *before*
+        calling this hook (`_download_agent_logs()` then
+        `_populate_agent_context()` in harbor/trial/trial.py), so the
+        transcripts are already on the host here under both the mounted and the
+        DooD-unmounted transfer modes.
+
+        xyne writes no terminal summary record: its own totals are the sum of
+        the per-assistant-message `usage` blocks (see `buildStateSnapshot` in
+        xyne-cli src/agent/serve.ts), so summing the same way agrees with what
+        xyne itself reports. Caveat: subagent turns are only counted if pi
+        persisted them into this session file — reconcile against a finished
+        run before trusting the absolute numbers.
+
+        Never raises: a token-accounting problem must not fail a graded trial.
+        """
+        try:
+            totals = sum_session_usage(self.logs_dir / "sessions")
+        except Exception:  # noqa: BLE001 — accounting must never fail a trial
+            self.logger.exception("Failed to sum xyne session usage")
+            return
+
+        if totals is None:
+            self.logger.debug("No xyne session usage found under %s", self.logs_dir)
+            return
+
+        for field, value in to_harbor_fields(totals).items():
+            setattr(context, field, value)
+        context.metadata = {
+            "usage_source": "xyne-session-jsonl",
+            "session_files": totals["files"],
+            "assistant_messages": totals["messages"],
+        }
 
     async def _detect_container_arch(self, environment: BaseEnvironment) -> str:
         result = await environment.exec(command="uname -m", user="root")
@@ -154,8 +188,16 @@ class XyneCliAgent(BaseInstalledAgent):
         escaped = shlex.quote(instruction)
         await self.exec_as_root(
             environment,
+            # --yolo is required, not a convenience. Headless `xyne prompt` has
+            # no interactive approver, so without it every mutating tool call
+            # (write/edit/bash) stalls at the permission gate and xyne exits 1
+            # with "a tool call was not executed" — i.e. no terminal-bench task
+            # can ever be solved. See handlePromptCommand in xyne-cli
+            # src/core/services/cli-parser.ts. Position is free: the flag is
+            # filtered out of the prompt text by exact match, and `escaped` is
+            # a single shell-quoted argv element.
             command=(
-                f"xyne prompt {escaped} --tools={ALLOWED_TOOLS} "
+                f"xyne prompt {escaped} --yolo --tools={ALLOWED_TOOLS} "
                 f"2>&1 | tee /logs/agent/xyne.log"
             ),
         )
