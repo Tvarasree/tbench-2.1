@@ -160,7 +160,9 @@ def load_attempts(run_dir: pathlib.Path, agent: str = "") -> list[dict]:
     if not run_dir.is_dir():
         return attempts
 
-    for trial_dir in sorted(p for p in run_dir.iterdir() if p.is_dir()):
+    for trial_dir in sorted(
+        p for p in run_dir.iterdir() if p.is_dir() and not p.name.startswith(".")
+    ):
         name = trial_dir.name
         # harbor names trial dirs "<task>__<suffix>"; run.sh splits the same way.
         task = name.split("__")[0] if "__" in name else name
@@ -461,6 +463,25 @@ def aggregate(attempts: list[dict], pricing: Pricing) -> dict:
     solved_tasks = [t for t in by_task.values() if t["solved"]]
     n_solved = len(solved_tasks)
 
+    successful_records = [
+        record
+        for record in attempts
+        if record["reward"] is not None and record["reward"] > 0
+    ]
+    measured_successful_records = [
+        record for record in successful_records if record["measured"]
+    ]
+    priceable_successful_records = [
+        record for record in successful_records if record["priceable"]
+    ]
+    tokens_successful = sum(
+        record["n_total_tokens"] for record in measured_successful_records
+    )
+    cost_successful = sum(
+        record["cost_usd_priced"] or 0.0
+        for record in priceable_successful_records
+    )
+
     # Cost that actually bought a solve, vs everything else. The honest
     # cost-per-success is the one that carries the failed retries.
     cost_winning = sum(t["cost_usd_winning_attempt"] for t in solved_tasks)
@@ -548,6 +569,25 @@ def aggregate(attempts: list[dict], pricing: Pricing) -> dict:
             ),
             "tokens_per_solve_winning_attempt_only": (
                 round(tokens_winning / n_solved, 1) if n_solved else None
+            ),
+            "successful_trials": len(successful_records),
+            "measured_successful_trials": len(measured_successful_records),
+            "tokens_successful_trials": tokens_successful,
+            "avg_tokens_per_successful_trial": (
+                round(tokens_successful / len(measured_successful_records), 1)
+                if measured_successful_records
+                else None
+            ),
+            "priceable_successful_trials": len(priceable_successful_records),
+            "cost_usd_successful_trials": (
+                round(cost_successful, 6)
+                if pricing.enabled and priceable_successful_records
+                else None
+            ),
+            "avg_cost_usd_per_successful_trial": (
+                round(cost_successful / len(priceable_successful_records), 6)
+                if pricing.enabled and priceable_successful_records
+                else None
             ),
         },
         "waste": {
@@ -696,6 +736,13 @@ def write_markdown(path: pathlib.Path, report: dict) -> None:
         f"{_fmt_usd(cps['cost_usd_per_solve_winning_attempt_only'])} "
         f"({_fmt_int(cps['tokens_per_solve_winning_attempt_only'])} tokens)"
     )
+    add(
+        f"- **Average successful trial**: "
+        f"{_fmt_int(cps['avg_tokens_per_successful_trial'])} tokens; "
+        f"{_fmt_usd(cps['avg_cost_usd_per_successful_trial'])} "
+        f"({cps['measured_successful_trials']}/{cps['successful_trials']} "
+        f"successful trials measured, {cps['priceable_successful_trials']} priceable)"
+    )
     add("")
     waste = agg["waste"]
     add(
@@ -740,7 +787,7 @@ def write_markdown(path: pathlib.Path, report: dict) -> None:
 
 
 def write_html(path: pathlib.Path, report: dict) -> None:
-    """Priced visual report. Only called when pricing is enabled."""
+    """Write a priced, self-contained visual report without changing metrics."""
     meta = report["meta"]
     agg = report["aggregates"]
     totals = agg["totals"]
@@ -750,138 +797,321 @@ def write_html(path: pathlib.Path, report: dict) -> None:
 
     def esc(value: Any) -> str:
         return (
-            str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            str(value)
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+            .replace("'", "&#x27;")
         )
 
     def usd(value: float | None) -> str:
         return "&mdash;" if value is None else f"${value:,.4f}"
 
-    outcome_rows = "".join(
-        "<tr><td>{o}</td><td>{a}</td><td>{tk:,}</td><td>{av:,.1f}</td>"
-        "<td>{c}</td><td>{ac}</td></tr>".format(
-            o=esc(outcome),
-            a=agg["by_outcome"][outcome]["attempts"],
-            tk=agg["by_outcome"][outcome]["n_total_tokens"],
-            av=agg["by_outcome"][outcome]["avg_total_tokens_per_attempt"],
-            c=usd(agg["by_outcome"][outcome]["cost_usd_priced"]),
-            ac=usd(agg["by_outcome"][outcome]["avg_cost_usd_per_attempt"]),
-        )
-        for outcome in OUTCOMES
+    def number(value: int | float | None) -> str:
+        if value is None:
+            return "&mdash;"
+        if isinstance(value, float) and not value.is_integer():
+            return f"{value:,.1f}"
+        return f"{int(value):,}"
+
+    def width(value: int | float | None, peak: int | float | None) -> float:
+        if value is None or peak is None or peak <= 0:
+            return 0.0
+        return min(100.0, 100.0 * value / peak)
+
+    labels = {"solved": "Solved", "unsolved": "Unsolved", "no-grade": "No grade"}
+    colours = {
+        "solved": "var(--blue)",
+        "unsolved": "var(--orange)",
+        "no-grade": "var(--green)",
+    }
+
+    stack_segments: list[str] = []
+    stack_legend: list[str] = []
+    outcome_rows: list[str] = []
+    outcome_bars: list[str] = []
+    total_tokens = totals["n_total_tokens"]
+    outcome_peak = max(
+        (agg["by_outcome"][outcome]["n_total_tokens"] for outcome in OUTCOMES),
+        default=0,
     )
-    round_rows = "".join(
-        "<tr><td>{r}</td><td>{a}</td><td>{s}</td><td>{tk:,}</td>"
-        "<td>{c}</td><td>{cps}</td></tr>".format(
-            r=esc(rnd),
-            a=b["attempts"],
-            s=b.get("solves", 0),
-            tk=b["n_total_tokens"],
-            c=usd(b["cost_usd_priced"]),
-            cps=(
-                usd(b["cost_usd_per_solve"])
-                if b.get("cost_usd_per_solve") is not None
-                else "&mdash;"
-            ),
+    for outcome in OUTCOMES:
+        bucket = agg["by_outcome"][outcome]
+        label = labels[outcome]
+        colour = colours[outcome]
+        share = width(bucket["n_total_tokens"], total_tokens)
+        inline = (
+            f'<span class="in-label">{label} {share:.1f}%</span>'
+            if share >= 20
+            else ""
         )
-        for rnd, b in agg["by_round"].items()
-    )
-    task_rows = "".join(
-        "<tr><td>{n}</td><td>{a}</td><td>{s}</td><td>{tk:,}</td>"
-        "<td>{c}</td></tr>".format(
-            n=esc(name),
-            a=t["attempts"],
-            s="yes" if t["solved"] else "no",
-            tk=t["n_total_tokens_all_attempts"],
-            c=usd(t["cost_usd_all_attempts"]),
+        stack_segments.append(
+            f'<span style="width:{share:.2f}%;background:{colour}">{inline}</span>'
         )
-        for name, t in agg["by_task"].items()
+        stack_legend.append(
+            f'<div><span class="swatch" style="background:{colour}"></span>'
+            f'{label} &mdash; {share:.1f}%</div>'
+        )
+        outcome_bars.append(
+            f'<div class="row"><div class="name">{label}</div>'
+            f'<div class="track"><div class="fill" data-chart="outcome" style="width:'
+            f'{width(bucket["n_total_tokens"], outcome_peak):.2f}%;background:{colour}">'
+            f'</div></div><div class="val">{number(bucket["n_total_tokens"])} tokens</div></div>'
+        )
+        outcome_rows.append(
+            f'<tr><td><span class="key"><span class="swatch" style="background:{colour}">'
+            f'</span>{label}</span></td><td class="n">{bucket["attempts"]}</td>'
+            f'<td class="n">{bucket["measured_attempts"]}</td>'
+            f'<td class="n">{bucket["priceable_attempts"]}</td>'
+            f'<td class="n">{number(bucket["n_input_tokens"])}</td>'
+            f'<td class="n">{number(bucket["n_cache_read_tokens"])}</td>'
+            f'<td class="n">{number(bucket["n_cache_write_tokens"])}</td>'
+            f'<td class="n">{number(bucket["n_output_tokens"])}</td>'
+            f'<td class="n">{number(bucket["n_total_tokens"])}</td>'
+            f'<td class="n">{number(bucket["avg_total_tokens_per_attempt"])}</td>'
+            f'<td class="n">{usd(bucket["cost_usd_priced"])}</td>'
+            f'<td class="n">{usd(bucket["avg_cost_usd_per_attempt"])}</td>'
+            f'<td class="n">{usd(bucket["cost_usd_billed"])}</td></tr>'
+        )
+
+    success_scenarios = [
+        (
+            "Including failed retries",
+            cps["tokens_per_solve_including_failed_retries"],
+            cps["cost_usd_per_solve_including_failed_retries"],
+            "All measured run usage divided by tasks solved at least once.",
+        ),
+        (
+            "Winning attempt only",
+            cps["tokens_per_solve_winning_attempt_only"],
+            cps["cost_usd_per_solve_winning_attempt_only"],
+            "Only the first successful attempt for each solved task.",
+        ),
+        (
+            "Average successful trial",
+            cps["avg_tokens_per_successful_trial"],
+            cps["avg_cost_usd_per_successful_trial"],
+            f'{cps["measured_successful_trials"]}/{cps["successful_trials"]} '
+            f'successful trials measured; {cps["priceable_successful_trials"]} priceable.',
+        ),
+    ]
+    success_peak = max((cost or 0 for _, _, cost, _ in success_scenarios), default=0)
+    success_cards = "".join(
+        f'<div class="scenario"><div class="scenario-head"><div><div class="k">{label}</div>'
+        f'<div class="scenario-value">{usd(cost)}</div></div>'
+        f'<div class="token-value">{number(tokens)} tokens</div></div>'
+        f'<div class="mini-track"><div class="fill" data-chart="success" '
+        f'style="width:{width(cost, success_peak):.2f}%">'
+        f'</div></div><p>{esc(note)}</p></div>'
+        for label, tokens, cost, note in success_scenarios
     )
 
+    round_peak = max(
+        (bucket.get("cost_usd_per_solve") or 0 for bucket in agg["by_round"].values()),
+        default=0,
+    )
+    round_bars: list[str] = []
+    round_rows: list[str] = []
+    for rnd, bucket in agg["by_round"].items():
+        label = f"Attempt {esc(rnd)}"
+        round_bars.append(
+            f'<div class="row"><div class="name">{label} &mdash; '
+            f'{bucket.get("solves", 0)} solves</div><div class="track">'
+            f'<div class="fill" data-chart="round" '
+            f'style="width:{width(bucket.get("cost_usd_per_solve"), round_peak):.2f}%;'
+            f'background:var(--blue)"></div></div>'
+            f'<div class="val">{usd(bucket.get("cost_usd_per_solve"))}</div></div>'
+        )
+        round_rows.append(
+            f'<tr><td>{label}</td><td class="n">{bucket["attempts"]}</td>'
+            f'<td class="n">{bucket.get("solves", 0)}</td>'
+            f'<td class="n">{bucket["measured_attempts"]}</td>'
+            f'<td class="n">{bucket["priceable_attempts"]}</td>'
+            f'<td class="n">{number(bucket["n_input_tokens"])}</td>'
+            f'<td class="n">{number(bucket["n_cache_read_tokens"])}</td>'
+            f'<td class="n">{number(bucket["n_cache_write_tokens"])}</td>'
+            f'<td class="n">{number(bucket["n_output_tokens"])}</td>'
+            f'<td class="n">{number(bucket["n_total_tokens"])}</td>'
+            f'<td class="n">{number(bucket["avg_total_tokens_per_attempt"])}</td>'
+            f'<td class="n">{usd(bucket["cost_usd_priced"])}</td>'
+            f'<td class="n">{usd(bucket["avg_cost_usd_per_attempt"])}</td>'
+            f'<td class="n">{usd(bucket["cost_usd_billed"])}</td>'
+            f'<td class="n">{usd(bucket.get("cost_usd_per_solve"))}</td></tr>'
+        )
+
+    task_rows = "".join(
+        f'<tr><td>{esc(name)}</td><td class="n">{task["attempts"]}</td>'
+        f'<td>{"yes" if task["solved"] else "no"}</td>'
+        f'<td class="n">{task["measured_attempts"]}/{task["attempts"]}</td>'
+        f'<td class="n">{task["priceable_attempts"]}/{task["attempts"]}</td>'
+        f'<td class="n">{number(task["n_total_tokens_all_attempts"])}</td>'
+        f'<td class="n">{usd(task["cost_usd_all_attempts"])}</td>'
+        f'<td class="n">{number(task["n_total_tokens_winning_attempt"])}</td>'
+        f'<td class="n">{usd(task["cost_usd_winning_attempt"] if task["solved"] else None)}</td></tr>'
+        for name, task in agg["by_task"].items()
+    )
+
+    quality = cov["quality_counts"]
+    quality_summary = " &middot; ".join(
+        f'{esc(name.replace("_", " "))} {count}'
+        for name, count in quality.items()
+    )
     coverage_banner = (
         ""
         if cov["complete"]
         else f'<p class="warn"><strong>Lower bound.</strong> {esc(cov["note"])}</p>'
     )
+    versions = meta.get("agent_versions") or []
+    version_text = ", ".join(esc(version) for version in versions) or "not reported"
+
+    css = """
+:root{color-scheme:light;--page:#f8f9fb;--surface:#fff;--text:#101114;
+--secondary:#555b66;--muted:#858b96;--line:#e2e5ea;--baseline:#c7ccd4;
+--border:rgba(16,17,20,.10);--blue:#2a78d6;--orange:#e96832;--green:#159b6c;
+--amber:#d68a00;--track:#e9edf2;--warn-bg:#fff6df;--warn-text:#775100;
+--shadow:0 12px 35px rgba(30,45,70,.06)}
+@media(prefers-color-scheme:dark){:root{color-scheme:dark;--page:#0d0f12;
+--surface:#181b20;--text:#f5f7fa;--secondary:#c2c7cf;--muted:#8e949e;
+--line:#2b3038;--baseline:#3b424c;--border:rgba(255,255,255,.10);
+--blue:#438ee8;--orange:#e36a39;--green:#22a879;--amber:#e4a11b;
+--track:#252a31;--warn-bg:#352b14;--warn-text:#ffd98d;
+--shadow:0 12px 35px rgba(0,0,0,.20)}}
+*{box-sizing:border-box}body{margin:0;padding:2.5rem 1.25rem 5rem;
+background:var(--page);color:var(--text);font:15px/1.6 system-ui,-apple-system,
+"Segoe UI",sans-serif}.wrap{max-width:72rem;margin:0 auto}header{margin-bottom:2.25rem}
+h1{font-size:1.8rem;line-height:1.2;margin:0 0 .55rem;letter-spacing:-.025em}
+.meta,.sub,.note{color:var(--secondary);font-size:.875rem}.meta{margin:0}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.84em;
+background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:.1em .35em}
+section{margin-bottom:2.8rem}h2{font-size:1.08rem;margin:0 0 .35rem;letter-spacing:-.01em}
+h2 .num{color:var(--muted);margin-right:.45rem}.sub{margin:0 0 1.1rem}
+.card,.tile,.scenario{background:var(--surface);border:1px solid var(--border);
+border-radius:12px;box-shadow:var(--shadow)}.card{padding:1.35rem 1.5rem}
+.hero{margin-bottom:1rem;background:linear-gradient(135deg,var(--surface),color-mix(in srgb,var(--blue) 7%,var(--surface)))}
+.hero .k,.tile .k,.scenario .k{color:var(--secondary);font-size:.78rem}
+.hero .v{font-size:3rem;font-weight:650;line-height:1;letter-spacing:-.04em;margin:.25rem 0}
+.hero .token{font-size:1rem;color:var(--blue);font-weight:600}.hero .foot{color:var(--secondary);font-size:.84rem;margin-top:.45rem}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:.75rem}
+.tile{padding:1rem 1.1rem}.tile .v{font-size:1.55rem;font-weight:650;line-height:1.2;margin-top:.2rem}
+.tile .foot{color:var(--muted);font-size:.74rem;margin-top:.25rem}
+.warn{background:var(--warn-bg);color:var(--warn-text);border:1px solid color-mix(in srgb,var(--amber) 35%,transparent);
+padding:.75rem 1rem;border-radius:9px;font-size:.88rem}.success-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:.75rem}
+.scenario{padding:1rem 1.1rem}.scenario-head{display:flex;justify-content:space-between;gap:1rem;align-items:flex-end}
+.scenario-value{font-size:1.65rem;font-weight:650;letter-spacing:-.025em}.token-value{font-size:.82rem;color:var(--secondary);text-align:right}
+.scenario p{color:var(--muted);font-size:.76rem;margin:.55rem 0 0}.mini-track,.track{background:var(--track);overflow:hidden}
+.mini-track{height:5px;border-radius:99px;margin-top:.8rem}.mini-track .fill,.fill{height:100%;background:var(--blue)}
+.stack{display:flex;gap:2px;height:26px;margin:.2rem 0 .85rem;overflow:hidden;border-radius:5px;background:var(--track)}
+.stack>span{position:relative;min-width:0}.in-label{position:absolute;inset:0;display:flex;align-items:center;padding-left:.6rem;
+font-size:.72rem;font-weight:650;color:#fff;white-space:nowrap}.legend{display:flex;flex-wrap:wrap;gap:.35rem 1.15rem;margin-bottom:1rem}
+.legend div{display:flex;align-items:center;gap:.42rem;font-size:.8rem;color:var(--secondary)}
+.swatch{width:10px;height:10px;border-radius:2px;display:inline-block;flex:none}.bars{display:grid;gap:.7rem;margin-bottom:1.15rem}
+.row{display:grid;grid-template-columns:minmax(8rem,13rem) 1fr auto;gap:.85rem;align-items:center}
+.row .name{font-size:.82rem;color:var(--secondary)}.track{height:18px;border-radius:0 4px 4px 0}
+.row .val{font-size:.82rem;font-weight:600;min-width:7rem;text-align:right;font-variant-numeric:tabular-nums}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin-top:.9rem}table{border-collapse:collapse;width:100%;min-width:46rem;font-size:.82rem}
+th,td{padding:.52rem .65rem;border-bottom:1px solid var(--line);white-space:nowrap;font-variant-numeric:tabular-nums}
+th{text-align:left;color:var(--secondary);font-size:.74rem;font-weight:650;border-bottom:1px solid var(--baseline)}
+td.n,th.n{text-align:right}.key{display:inline-flex;align-items:center;gap:.45rem}tbody tr:last-child td{border-bottom:0}
+.waste-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.75rem}
+.waste-item{padding:.9rem 1rem;border-left:3px solid var(--blue);background:var(--surface);border-radius:0 8px 8px 0}
+.waste-item.bad{border-color:var(--orange)}.waste-item .k{color:var(--secondary);font-size:.78rem}
+.waste-item .v{font-size:1.35rem;font-weight:650}.waste-item .foot{color:var(--muted);font-size:.76rem}
+footer{border-top:1px solid var(--line);padding-top:1.4rem;color:var(--secondary);font-size:.82rem}
+footer h3{color:var(--text);font-size:.9rem;margin:1rem 0 .35rem}footer p{margin:.3rem 0}
+@media(max-width:42rem){body{padding:1.5rem .8rem 3rem}.card{padding:1rem}.hero .v{font-size:2.35rem}
+.row{grid-template-columns:6.5rem 1fr}.row .val{grid-column:2}.in-label{display:none}.scenario-head{display:block}.token-value{text-align:left;margin-top:.25rem}}
+"""
 
     path.write_text(
         f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Token usage — {esc(meta['eval_run_id'])}</title>
-<style>
- :root {{ color-scheme: light dark; --fg:#1a1a1a; --bg:#fff; --mut:#666;
-          --line:#e3e3e3; --accent:#0b5fff; --warnbg:#fff6e5; --warnfg:#8a5a00; }}
- @media (prefers-color-scheme: dark) {{
-   :root {{ --fg:#e8e8e8; --bg:#141416; --mut:#a0a0a0; --line:#2e2e33;
-            --accent:#6fa2ff; --warnbg:#3a2f14; --warnfg:#ffd88a; }} }}
- body {{ font: 15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-         color:var(--fg); background:var(--bg); margin:0; padding:2rem 1.25rem; }}
- main {{ max-width: 60rem; margin: 0 auto; }}
- h1 {{ font-size:1.5rem; margin:0 0 .25rem; }}
- h2 {{ font-size:1.1rem; margin:2rem 0 .5rem; border-bottom:1px solid var(--line);
-       padding-bottom:.3rem; }}
- .sub {{ color:var(--mut); margin:0 0 1.25rem; font-size:.9rem; }}
- .cards {{ display:grid; gap:.75rem;
-           grid-template-columns:repeat(auto-fit,minmax(11rem,1fr)); margin:1rem 0; }}
- .card {{ border:1px solid var(--line); border-radius:.5rem; padding:.75rem .9rem; }}
- .card .k {{ color:var(--mut); font-size:.78rem; text-transform:uppercase;
-             letter-spacing:.04em; }}
- .card .v {{ font-size:1.35rem; font-weight:600; margin-top:.2rem; }}
- .warn {{ background:var(--warnbg); color:var(--warnfg); padding:.7rem .9rem;
-          border-radius:.5rem; font-size:.9rem; }}
- .note {{ color:var(--mut); font-size:.87rem; }}
- .scroll {{ overflow-x:auto; }}
- table {{ border-collapse:collapse; width:100%; font-size:.9rem; }}
- th,td {{ text-align:right; padding:.4rem .6rem; border-bottom:1px solid var(--line);
-          white-space:nowrap; }}
- th:first-child, td:first-child {{ text-align:left; }}
- th {{ color:var(--mut); font-weight:600; }}
- strong.big {{ color:var(--accent); }}
-</style></head><body><main>
-<h1>Token usage &mdash; {esc(meta['eval_run_id'])}</h1>
-<p class="sub">agent <code>{esc(meta['agent'])}</code> &middot;
- model <code>{esc(meta['model'])}</code> &middot;
- {esc(meta['attempts'])} attempts/task &middot; {esc(meta['generated_at'])}</p>
-<p class="note">{esc(meta['pricing_note'])}</p>
+<title>Token usage &amp; cost &mdash; {esc(meta['eval_run_id'])}</title>
+<style>{css}</style></head><body><div class="wrap">
+<header><h1>Terminal-Bench Token Usage &amp; Cost</h1>
+<p class="meta">Run <code>{esc(meta['eval_run_id'])}</code> &middot;
+agent <code>{esc(meta['agent'])}</code> &middot; model <code>{esc(meta['model'])}</code><br>
+{esc(meta['attempts'])} attempts/task &middot; generated {esc(meta['generated_at'])} &middot;
+agent version {version_text}</p><p class="note">{esc(meta['pricing_note'])}</p></header>
 {coverage_banner}
+<section><div class="card hero"><div class="k">Cost per solved task, including failed retries</div>
+<div class="v">{usd(cps['cost_usd_per_solve_including_failed_retries'])}</div>
+<div class="token">{number(cps['tokens_per_solve_including_failed_retries'])} tokens per solved task</div>
+<div class="foot">{cps['tasks_solved']} tasks solved &middot; {totals['attempts']} trials &middot;
+{usd(totals['cost_usd_priced'])} custom-priced total</div></div>
 <div class="cards">
- <div class="card"><div class="k">Total tokens</div>
-   <div class="v">{totals['n_total_tokens']:,}</div></div>
- <div class="card"><div class="k">Cost (priced)</div>
-   <div class="v">{usd(totals['cost_usd_priced'])}</div></div>
- <div class="card"><div class="k">Tasks solved</div>
-   <div class="v">{cps['tasks_solved']}</div></div>
- <div class="card"><div class="k">Coverage</div>
-   <div class="v">{cov['measured_pct']}%</div></div>
-</div>
-<h2>Cost per success</h2>
-<p>Including failed retries: <strong class="big">
- {usd(cps['cost_usd_per_solve_including_failed_retries'])}</strong>
- per solve &mdash; the honest figure. Winning attempt only:
- {usd(cps['cost_usd_per_solve_winning_attempt_only'])}.</p>
-<p>Spend that bought a solve: {usd(waste['cost_usd_attributable_to_a_solve'])}.
- <strong>Wasted: {usd(waste['cost_usd_wasted'])}</strong>
- ({waste['wasted_pct'] if waste['wasted_pct'] is not None else 0}%).</p>
-<h2>By outcome</h2>
-<div class="scroll"><table>
-<tr><th>Outcome</th><th>Attempts</th><th>Tokens</th><th>Avg tokens/attempt</th>
-    <th>Cost</th><th>Avg cost/attempt</th></tr>
-{outcome_rows}
-</table></div>
-<p class="note">Compare the averages, not the totals: failing attempts that cost
- as much as succeeding ones is what changes retry-budget decisions.</p>
-<h2>By attempt round</h2>
-<div class="scroll"><table>
-<tr><th>Round</th><th>Attempts</th><th>Solves</th><th>Tokens</th><th>Cost</th>
-    <th>Cost per solve</th></tr>
-{round_rows}
-</table></div>
-<h2>Per task</h2>
-<div class="scroll"><table>
-<tr><th>Task</th><th>Attempts</th><th>Solved</th><th>Tokens (all attempts)</th>
-    <th>Cost (all attempts)</th></tr>
-{task_rows}
-</table></div>
-</main></body></html>
+<div class="tile"><div class="k">Total tokens</div><div class="v">{number(totals['n_total_tokens'])}</div>
+<div class="foot">Measured run total</div></div>
+<div class="tile"><div class="k">Custom-priced cost</div><div class="v">{usd(totals['cost_usd_priced'])}</div>
+<div class="foot">Billed upstream: {usd(totals['cost_usd_billed'])}</div></div>
+<div class="tile"><div class="k">Tasks solved</div><div class="v">{cps['tasks_solved']}</div>
+<div class="foot">{cps['successful_trials']} successful trials</div></div>
+<div class="tile"><div class="k">Measurement coverage</div><div class="v">{cov['measured_pct']}%</div>
+<div class="foot">{cov['measured_attempts']}/{cov['total_attempts']} measured; {cov['priceable_attempts']} priceable</div></div>
+</div></section>
+
+<section><h2><span class="num">1</span>Token composition</h2>
+<p class="sub">Harbor input includes cache. Cache read and write are shown separately for transparent pricing.</p>
+<div class="cards">
+<div class="tile"><div class="k">Input including cache</div><div class="v">{number(totals['n_input_tokens'])}</div></div>
+<div class="tile"><div class="k">Cache read</div><div class="v">{number(totals['n_cache_read_tokens'])}</div></div>
+<div class="tile"><div class="k">Cache write</div><div class="v">{number(totals['n_cache_write_tokens'])}</div></div>
+<div class="tile"><div class="k">Output</div><div class="v">{number(totals['n_output_tokens'])}</div></div>
+</div></section>
+
+<section><h2><span class="num">2</span>Success economics</h2>
+<p class="sub">Three intentionally different views. Failed trials are isolated runs, so the successful-trial average excludes them.</p>
+<div class="success-grid">{success_cards}</div>
+<p class="note">Successful-trial totals: {number(cps['tokens_successful_trials'])} measured tokens and
+{usd(cps['cost_usd_successful_trials'])} across {cps['successful_trials']} successful trials.</p></section>
+
+<section><h2><span class="num">3</span>Token usage by outcome</h2>
+<p class="sub">Share and volume of measured tokens. Exact token components and costs remain in the table.</p>
+<div class="card"><div class="stack">{''.join(stack_segments)}</div>
+<div class="legend">{''.join(stack_legend)}</div><div class="bars">{''.join(outcome_bars)}</div>
+<div class="scroll"><table><thead><tr><th>Outcome</th><th class="n">Trials</th>
+<th class="n">Measured</th><th class="n">Priceable</th><th class="n">Input</th><th class="n">Cache read</th>
+<th class="n">Cache write</th><th class="n">Output</th><th class="n">Total</th>
+<th class="n">Avg tokens/trial</th><th class="n">Priced cost</th>
+<th class="n">Avg cost/trial</th><th class="n">Billed cost</th>
+</tr></thead><tbody>{''.join(outcome_rows)}</tbody></table></div></div></section>
+
+<section><h2><span class="num">4</span>Economics by attempt round</h2>
+<p class="sub">Bars compare custom-priced cost per solve; the table retains every round-level token and cost metric.</p>
+<div class="card"><div class="bars">{''.join(round_bars)}</div>
+<div class="scroll"><table><thead><tr><th>Round</th><th class="n">Trials</th><th class="n">Solves</th>
+<th class="n">Measured</th><th class="n">Priceable</th><th class="n">Input</th>
+<th class="n">Cache read</th><th class="n">Cache write</th><th class="n">Output</th>
+<th class="n">Total</th><th class="n">Avg tokens/trial</th><th class="n">Priced cost</th>
+<th class="n">Avg cost/trial</th><th class="n">Billed cost</th>
+<th class="n">Cost/solve</th></tr></thead><tbody>{''.join(round_rows)}</tbody></table></div></div></section>
+
+<section><h2><span class="num">5</span>Attribution and waste</h2>
+<p class="sub">Winning-attempt usage is attributable to a solve; all other measured usage remains retry or unsolved spend.</p>
+<div class="waste-grid">
+<div class="waste-item"><div class="k">Attributable to solves</div><div class="v">{usd(waste['cost_usd_attributable_to_a_solve'])}</div>
+<div class="foot">{number(waste['tokens_attributable_to_a_solve'])} tokens</div></div>
+<div class="waste-item bad"><div class="k">Not attributable to solves</div><div class="v">{usd(waste['cost_usd_wasted'])}</div>
+<div class="foot">{number(waste['tokens_wasted'])} tokens &middot; {number(waste['wasted_pct'])}% of custom-priced cost</div></div>
+</div></section>
+
+<section><h2><span class="num">6</span>Per task</h2>
+<p class="sub">All attempts remain visible alongside the first winning attempt. A zero winning value means the task was not solved.</p>
+<div class="card"><div class="scroll"><table><thead><tr><th>Task</th><th class="n">Trials</th>
+<th>Solved</th><th class="n">Measured</th><th class="n">Priceable</th>
+<th class="n">All tokens</th><th class="n">All cost</th><th class="n">Winning tokens</th>
+<th class="n">Winning cost</th></tr></thead><tbody>{task_rows}</tbody></table></div></div></section>
+
+<footer><h3>Methodology</h3><p>{esc(cov['note'])}</p>
+<p><strong>Coverage quality:</strong> {quality_summary}.</p>
+<p>Custom prices are supplied with the run and are not provider-verified. Input includes cache;
+cache-read and cache-write rates are applied separately when available. Missing telemetry contributes no tokens,
+so incomplete-coverage totals are lower bounds.</p><h3>Metric definitions</h3>
+<p><strong>Including failed retries</strong> divides all measured run usage by tasks solved at least once.
+<strong>Winning attempt only</strong> uses the first successful trial per solved task.
+<strong>Average successful trial</strong> includes every independently successful trial and excludes failed trials.</p></footer>
+</div></body></html>
 """,
         encoding="utf-8",
     )

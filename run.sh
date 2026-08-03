@@ -197,7 +197,9 @@ write_fallback_results() {
 {
   "metrics": {
     "main": { "name": "Solved", "value": 0 },
-    "secondary": { "solved": 0, "total": 0, "solve_rate_pct": 0 },
+    "secondary": { "solved": 0, "total": 0, "solve_rate_pct": 0,
+                   "successful_trials": 0, "planned_trials": 0,
+                   "trial_accuracy_pct": 0 },
     "additional": { "status": "no-results", "reason": "${reason}" }
   }
 }
@@ -563,132 +565,16 @@ python3 "${SCRIPT_DIR}/analysis/token_usage.py" \
 
 log_step "results"
 
-RESULTS_FILE="$RESULTS_FILE" RUN_DIR="$RUN_DIR" EVAL_RUN_ID="$EVAL_RUN_ID" \
-TOKEN_USAGE_JSON="$TOKEN_USAGE_JSON" \
-AGENT="$AGENT" MODEL="$MODEL" DATASET="$DATASET" ATTEMPTS="$ATTEMPTS" \
-N_SEL="$N_SEL" HARBOR_RC="$HARBOR_RC" python3 - <<'PYEOF'
-import json, os, glob
-
-run_dir   = os.environ["RUN_DIR"]
-results_f = os.environ["RESULTS_FILE"]
-attempts  = int(os.environ.get("ATTEMPTS", "1") or 1)
-n_sel     = int(os.environ.get("N_SEL", "0") or 0)
-
-# trial dirs look like "<task>__<suffix>"; group attempts by task.
-tasks = {}
-for trial in sorted(glob.glob(os.path.join(run_dir, "*/"))):
-    base = os.path.basename(trial.rstrip("/"))
-    task = base.split("__")[0] if "__" in base else base
-    rec = tasks.setdefault(task, {"attempts": 0, "graded": 0, "passed": 0})
-    rec["attempts"] += 1
-    rf = os.path.join(trial, "verifier", "reward.txt")
-    if os.path.isfile(rf):
-        try:
-            val = float(open(rf).read().strip())
-            rec["graded"] += 1
-            if val >= 1:
-                rec["passed"] += 1
-        except Exception:
-            pass
-
-def token_usage_headline():
-    """Flat headline from token_usage.json, or a reason it is absent.
-
-    Kept defensive and side-effect free: the results file must be written even
-    if the token reporter crashed, wrote nothing, or produced a shape we don't
-    recognise.
-    """
-    path = os.environ.get("TOKEN_USAGE_JSON", "")
-    if not path or not os.path.isfile(path):
-        return {"status": "unavailable", "reason": "token_usage.json not written"}
-    try:
-        with open(path, encoding="utf-8") as fh:
-            data = json.load(fh)
-        agg = data["aggregates"]
-        cov, tot = agg["coverage"], agg["totals"]
-        cps, waste = agg["cost_per_success"], agg["waste"]
-        return {
-            "status": "ok",
-            "priced": data["meta"].get("priced", False),
-            # Only per-run record of which unpinned @xyne/xyne-cli build ran.
-            "agent_versions": data["meta"].get("agent_versions", []),
-            "pricing_note": data["meta"].get("pricing_note", ""),
-            "measured_attempts": cov["measured_attempts"],
-            "priceable_attempts": cov.get("priceable_attempts", 0),
-            "total_attempts": cov["total_attempts"],
-            "measured_pct": cov["measured_pct"],
-            "measurement_quality": cov.get("quality_counts", {}),
-            "coverage_note": cov["note"],
-            "n_input_tokens": tot["n_input_tokens"],
-            "n_cache_tokens": tot["n_cache_tokens"],
-            "n_output_tokens": tot["n_output_tokens"],
-            "n_total_tokens": tot["n_total_tokens"],
-            "cost_usd_billed": tot["cost_usd_billed"] or None,
-            "cost_usd_priced": tot["cost_usd_priced"] or None,
-            "cost_usd_per_solve_including_failed_retries":
-                cps["cost_usd_per_solve_including_failed_retries"],
-            "cost_usd_per_solve_winning_attempt_only":
-                cps["cost_usd_per_solve_winning_attempt_only"],
-            "cost_usd_wasted": waste["cost_usd_wasted"],
-            "wasted_pct": waste["wasted_pct"],
-        }
-    except Exception as exc:  # noqa: BLE001 — never block the results write
-        return {"status": "unreadable", "reason": repr(exc)}
-
-
-solved = sorted(t for t, r in tasks.items() if r["passed"] >= 1)
-graded_tasks = [t for t, r in tasks.items() if r["graded"] >= 1]
-unsolved = sorted(t for t in graded_tasks if t not in solved)
-nograde  = sorted(t for t, r in tasks.items() if r["graded"] == 0)
-
-n_solved = len(solved)
-n_total  = n_sel if n_sel else len(tasks)
-rate = round(100.0 * n_solved / n_total, 2) if n_total else 0.0
-
-# main: count (mirrors swe-auto-eval "Total Resolved"); secondary: flat
-# scalars the dashboard renders as columns; additional: nested detail.
-results = {
-    "metrics": {
-        "main": {"name": "Solved", "value": n_solved},
-        "secondary": {
-            "solved": n_solved,
-            "unsolved": len(unsolved),
-            "no_grade": len(nograde),
-            "total": n_total,
-            "solve_rate_pct": rate,
-        },
-        "additional": {
-            "agent": os.environ.get("AGENT", ""),
-            "model": os.environ.get("MODEL", ""),
-            "dataset": os.environ.get("DATASET", ""),
-            "attempts_per_task": attempts,
-            "harbor_exit_code": int(os.environ.get("HARBOR_RC", "0") or 0),
-            "token_usage": token_usage_headline(),
-            "solved_tasks": solved,
-            "unsolved_tasks": unsolved,
-            "no_grade_tasks": nograde,
-            "per_task": {
-                t: {
-                    "passed_attempts": r["passed"],
-                    "graded_attempts": r["graded"],
-                    "total_attempts": r["attempts"],
-                    "verdict": ("solved" if r["passed"] >= 1
-                                else "unsolved" if r["graded"] >= 1
-                                else "no-grade"),
-                } for t, r in sorted(tasks.items())
-            },
-        },
-    }
-}
-os.makedirs(os.path.dirname(results_f), exist_ok=True)
-tmp = results_f + ".tmp"
-with open(tmp, "w") as f:
-    json.dump(results, f, indent=2)
-os.replace(tmp, results_f)
-print(f"[ok] results → {results_f}")
-print(f"     solved {n_solved}/{n_total} ({rate}%) | "
-      f"unsolved {len(unsolved)} | no-grade {len(nograde)}")
-PYEOF
+python3 "${SCRIPT_DIR}/analysis/results.py" \
+  --run-dir "$RUN_DIR" \
+  --token-usage "$TOKEN_USAGE_JSON" \
+  --output "$RESULTS_FILE" \
+  --agent "$AGENT" \
+  --model "$MODEL" \
+  --dataset "$DATASET" \
+  --attempts "$ATTEMPTS" \
+  --selected-tasks "$N_SEL" \
+  --harbor-exit-code "$HARBOR_RC"
 RESULTS_RC=$?
 
 # Clear the always-write trap only if the real results file now exists.
@@ -715,6 +601,8 @@ print('  unsolved    :', s.get('unsolved'))
 print('  no_grade    :', s.get('no_grade'))
 print('  total       :', s.get('total'))
 print('  solve_rate% :', s.get('solve_rate_pct'))
+print('  trial acc%  :', s.get('trial_accuracy_pct'),
+      '(' + str(s.get('successful_trials')) + '/' + str(s.get('planned_trials')) + ')')
 " 2>/dev/null || true
 echo
 echo "Session logs (synced by the eval-runner as repo/logs/): $RUN_DIR/"

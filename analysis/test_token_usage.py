@@ -115,6 +115,17 @@ class LoadAttemptsTest(unittest.TestCase):
             self.assertFalse(attempt["measured"])
             self.assertEqual(attempt["n_total_tokens"], 0)
 
+    def test_hidden_harbor_directories_are_not_attempts(self) -> None:
+        """Harbor caches such as .sources must not reduce usage coverage."""
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = pathlib.Path(tmp)
+            make_trial(run_dir, "alpha__1", reward=1.0, tokens=(80, 0, 20))
+            (run_dir / ".sources" / "cached-task").mkdir(parents=True)
+
+            attempts = tu.load_attempts(run_dir)
+
+        self.assertEqual([attempt["trial"] for attempt in attempts], ["alpha__1"])
+
     def test_multi_step_contexts_are_summed(self) -> None:
         """step_results are aggregated when agent_result is null."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -399,6 +410,70 @@ class AggregateTest(unittest.TestCase):
         # Honest figure: the whole run bought one solve.
         self.assertEqual(cps["tokens_per_solve_including_failed_retries"], 1200.0)
 
+    def test_successful_trial_average_excludes_failed_trials(self) -> None:
+        """Catches treating isolated failed trials as inputs to a successful trial."""
+        agg = self._run()
+        success = agg["cost_per_success"]
+        self.assertEqual(success["successful_trials"], 1)
+        self.assertEqual(success["measured_successful_trials"], 1)
+        self.assertEqual(success["tokens_successful_trials"], 200)
+        self.assertEqual(success["avg_tokens_per_successful_trial"], 200.0)
+        self.assertEqual(success["priceable_successful_trials"], 1)
+        self.assertAlmostEqual(success["cost_usd_successful_trials"], 0.0002)
+        self.assertAlmostEqual(
+            success["avg_cost_usd_per_successful_trial"], 0.0002
+        )
+
+    def test_successful_trial_average_accepts_fractional_positive_reward(self) -> None:
+        """Official trial success is reward > 0, independently of task solved >= 1."""
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = pathlib.Path(tmp)
+            make_trial(run_dir, "a__1", reward=0.5, tokens=(80, 0, 20))
+            success = tu.aggregate(
+                tu.load_attempts(run_dir), tu.Pricing(1.0, 1.0, None)
+            )["cost_per_success"]
+
+        self.assertEqual(success["tasks_solved"], 0)
+        self.assertEqual(success["successful_trials"], 1)
+        self.assertEqual(success["measured_successful_trials"], 1)
+        self.assertEqual(success["tokens_successful_trials"], 100)
+        self.assertEqual(success["avg_tokens_per_successful_trial"], 100.0)
+
+    def test_successful_trial_average_uses_only_measured_successes(self) -> None:
+        """Catches treating missing successful-trial telemetry as zero tokens."""
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = pathlib.Path(tmp)
+            make_trial(run_dir, "a__1", reward=1.0, tokens=(80, 0, 20))
+            make_trial(run_dir, "a__2", reward=1.0, tokens=(160, 0, 40))
+            make_trial(run_dir, "b__1", reward=1.0, tokens=None)
+            make_trial(run_dir, "b__2", reward=0.0, tokens=(400, 0, 100))
+            success = tu.aggregate(
+                tu.load_attempts(run_dir), tu.Pricing(1.0, 1.0, None)
+            )["cost_per_success"]
+
+        self.assertEqual(success["successful_trials"], 3)
+        self.assertEqual(success["measured_successful_trials"], 2)
+        self.assertEqual(success["tokens_successful_trials"], 300)
+        self.assertEqual(success["avg_tokens_per_successful_trial"], 150.0)
+        self.assertEqual(success["priceable_successful_trials"], 2)
+        self.assertAlmostEqual(success["cost_usd_successful_trials"], 0.0003)
+        self.assertAlmostEqual(
+            success["avg_cost_usd_per_successful_trial"], 0.00015
+        )
+
+    def test_unpriced_successful_trial_cost_average_is_null(self) -> None:
+        """Catches presenting zero dollars when no pricing was supplied."""
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = pathlib.Path(tmp)
+            make_trial(run_dir, "a__1", reward=1.0, tokens=(80, 0, 20))
+            success = tu.aggregate(
+                tu.load_attempts(run_dir), tu.Pricing(None, None, None)
+            )["cost_per_success"]
+
+        self.assertEqual(success["avg_tokens_per_successful_trial"], 100.0)
+        self.assertIsNone(success["cost_usd_successful_trials"])
+        self.assertIsNone(success["avg_cost_usd_per_successful_trial"])
+
     def test_waste_is_everything_not_attributable_to_a_solve(self) -> None:
         agg = self._run()
         waste = agg["waste"]
@@ -461,8 +536,20 @@ class EmittersTest(unittest.TestCase):
     def _build(self, out_dir: pathlib.Path, priced: bool) -> int:
         run_dir = out_dir / "run"
         run_dir.mkdir()
-        make_trial(run_dir, "alpha__1", reward=1.0, tokens=(100, 40, 100))
-        make_trial(run_dir, "beta__1", reward=0.0, tokens=(300, 0, 100))
+        make_trial(
+            run_dir,
+            "alpha__1",
+            reward=1.0,
+            tokens=(100, 40, 100),
+            cost=0.01 if priced else None,
+        )
+        make_trial(
+            run_dir,
+            "beta__1",
+            reward=0.0,
+            tokens=(300, 0, 100),
+            cost=0.02 if priced else None,
+        )
         argv = [
             "--run-dir", str(run_dir),
             "--out-dir", str(out_dir),
@@ -495,6 +582,9 @@ class EmittersTest(unittest.TestCase):
             self.assertIsNone(
                 report["aggregates"]["totals"]["cost_usd_billed"]
             )
+            markdown = (out / "token_usage.md").read_text()
+            self.assertIn("Average successful trial", markdown)
+            self.assertIn("1/1 successful trials measured", markdown)
 
     def test_priced_run_emits_html_too(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -502,7 +592,68 @@ class EmittersTest(unittest.TestCase):
             self.assertEqual(self._build(out, priced=True), 0)
             self.assertTrue((out / "token_usage.html").is_file())
             html = (out / "token_usage.html").read_text()
-            self.assertIn("Cost per success", html)
+            self.assertIn('class="stack"', html)
+            self.assertIn('class="bars"', html)
+            self.assertIn("Including failed retries", html)
+            self.assertIn("Winning attempt only", html)
+            self.assertIn("Average successful trial", html)
+            self.assertIn("1/1 successful trials measured", html)
+            self.assertIn("Cache read", html)
+            self.assertIn("Cache write", html)
+            for heading in (
+                "Priceable",
+                "Avg tokens/trial",
+                "Avg cost/trial",
+                "Billed cost",
+                "Successful-trial totals",
+                "Coverage quality",
+                "Winning tokens",
+                "Winning cost",
+                "Attributable to solves",
+                "Not attributable to solves",
+            ):
+                self.assertIn(heading, html)
+            beta_row = html.split("<td>beta</td>", 1)[1].split("</tr>", 1)[0]
+            self.assertNotIn("$0.0000", beta_row)
+            self.assertTrue(beta_row.endswith('<td class="n">&mdash;</td>'))
+            solved_row = html.split("</span>Solved</span></td>", 1)[1].split(
+                "</tr>", 1
+            )[0]
+            self.assertEqual(
+                solved_row,
+                '<td class="n">1</td><td class="n">1</td>'
+                '<td class="n">1</td><td class="n">100</td>'
+                '<td class="n">40</td><td class="n">0</td>'
+                '<td class="n">100</td><td class="n">200</td>'
+                '<td class="n">200</td><td class="n">$0.0017</td>'
+                '<td class="n">$0.0017</td><td class="n">$0.0100</td>',
+            )
+            round_row = html.split("<tr><td>Attempt 1</td>", 1)[1].split(
+                "</tr>", 1
+            )[0]
+            self.assertEqual(
+                round_row,
+                '<td class="n">2</td><td class="n">1</td>'
+                '<td class="n">2</td><td class="n">2</td>'
+                '<td class="n">400</td><td class="n">40</td>'
+                '<td class="n">0</td><td class="n">200</td>'
+                '<td class="n">600</td><td class="n">300</td>'
+                '<td class="n">$0.0041</td><td class="n">$0.0020</td>'
+                '<td class="n">$0.0300</td><td class="n">$0.0041</td>',
+            )
+            self.assertIn("Billed upstream: $0.0300", html)
+            self.assertIn(
+                "Successful-trial totals: 200 measured tokens and\n"
+                "$0.0017 across 1 successful trials.",
+                html,
+            )
+            self.assertIn(
+                "Coverage quality:</strong> full 2 &middot; partial 0 &middot; "
+                "total only 0 &middot; unmeasured 0.",
+                html,
+            )
+            self.assertIn("$0.0017</div>\n<div class=\"foot\">200 tokens", html)
+            self.assertIn("$0.0024</div>\n<div class=\"foot\">400 tokens", html)
             report = json.loads((out / "token_usage.json").read_text())
             self.assertTrue(report["meta"]["priced"])
             # alpha: 60 uncached*3 + 40 cache*0.3 + 100 out*15 = 180+12+1500 = 1692
@@ -510,6 +661,57 @@ class EmittersTest(unittest.TestCase):
             # total 4092 / 1e6
             self.assertAlmostEqual(
                 report["aggregates"]["totals"]["cost_usd_priced"], 0.004092
+            )
+
+    def test_html_escapes_artifact_labels_and_handles_zero_bars(self) -> None:
+        """Catches HTML injection and division by zero in visual normalization."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            run_dir = root / "run"
+            run_dir.mkdir()
+            make_trial(
+                run_dir,
+                "<script>alert(1)<script>__1",
+                reward=1.0,
+                tokens=(0, 0, 0),
+            )
+            attempts = tu.load_attempts(run_dir)
+            report = tu.build_report(
+                attempts,
+                tu.Pricing(1.0, 1.0, None),
+                {
+                    "eval_run_id": "<unsafe-run>",
+                    "agent": "<unsafe-agent>",
+                    "model": "<unsafe-model>",
+                    "attempts": "1",
+                    "generated_at": "2026-08-03T00:00:00Z",
+                    "pricing_note": "<unsafe-price-note>",
+                    "priced": True,
+                    "agent_versions": ["<unsafe-version>"],
+                },
+            )
+            report["aggregates"]["coverage"]["note"] = "<unsafe-coverage-note>"
+            output = root / "token_usage.html"
+
+            tu.write_html(output, report)
+            html = output.read_text(encoding="utf-8")
+
+        self.assertNotIn("<script>alert(1)<script>", html)
+        self.assertIn("&lt;script&gt;alert(1)&lt;script&gt;", html)
+        for sentinel in (
+            "unsafe-run",
+            "unsafe-agent",
+            "unsafe-model",
+            "unsafe-price-note",
+            "unsafe-version",
+            "unsafe-coverage-note",
+        ):
+            self.assertNotIn(f"<{sentinel}>", html)
+            self.assertIn(f"&lt;{sentinel}&gt;", html)
+        for chart in ("success", "outcome", "round"):
+            self.assertIn(
+                f'data-chart="{chart}" style="width:0.00%',
+                html,
             )
 
     def test_empty_run_dir_exits_clean(self) -> None:

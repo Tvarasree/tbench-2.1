@@ -49,13 +49,22 @@ bash run.sh    [API_KEY] EVAL_RUN_ID [--flags ...]   # the actual eval
 { "metrics": {
     "main":       { "name": "Solved", "value": <#tasks solved> },
     "secondary":  { "solved": N, "unsolved": U, "no_grade": G,
-                    "total": T, "solve_rate_pct": R },
+                    "total": T, "solve_rate_pct": R,
+                    "successful_trials": Z, "planned_trials": P,
+                    "trial_accuracy_pct": A },
     "additional": { "agent": "...", "model": "...", "per_task": { ... }, ... }
 } }
 ```
 
 A task counts as **solved** if `verifier/reward.txt >= 1` in **≥1** of its
 `--attempts` trials (pass@k).
+
+The main metric remains solved tasks (`x/T`). `trial_accuracy_pct` is the
+official-style individual-trial metric (`Z/P * 100`), where
+`P = selected tasks * configured attempts`; missing, errored, malformed, and
+no-grade trials retain their planned denominator slot and count as failures.
+`metrics.additional.solved_task_trial_success_pct` averages each solved task's
+`passed_attempts / configured attempts`, with completely unsolved tasks excluded.
 
 ---
 
@@ -168,6 +177,17 @@ The report prefers each agent's native artifact, preserving fields Harbor
 Every row records its source and measurement quality. Outcomes come from
 `verifier/reward.txt`; one row is one **trial** = one attempt.
 
+Two token-efficiency views are emitted together:
+
+* The existing `tokens_per_solve_including_failed_retries` remains total
+  measured run tokens divided by tasks solved at least once. It represents the
+  whole evaluation spend needed to produce the observed solved-task count.
+* `avg_tokens_per_successful_trial` sums only successful trials and divides by
+  successful trials with measured telemetry. Failed trials are excluded because
+  Harbor trials are isolated. Its successful/measured/priceable counts are
+  included alongside it, and the priced equivalent uses only priceable
+  successful trials.
+
 **Coverage is a first-class output.** Killed trials can still lack a complete
 artifact, so any total taken at < 100% coverage is a lower bound and is
 labelled as one. Harbor 0.13.1's old Goose combined-total fallback is retained
@@ -184,7 +204,7 @@ Reporting is non-fatal and standalone-runnable over a finished job:
 ```bash
 python3 analysis/token_usage.py --run-dir logs/<job-id> --out-dir /tmp/report \
   --price-input 3 --price-output 15
-python3 -m unittest discover -s analysis -p 'test_*.py'   # 46 tests, stdlib only
+python3 -m unittest discover -s analysis -p 'test_*.py'   # stdlib-only test suite
 ```
 
 ---

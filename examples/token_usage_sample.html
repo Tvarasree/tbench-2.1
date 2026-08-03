@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Token usage &amp; cost &mdash; sample-terminal-bench-v2.1</title>
+<style>
+:root{color-scheme:light;--page:#f8f9fb;--surface:#fff;--text:#101114;
+--secondary:#555b66;--muted:#858b96;--line:#e2e5ea;--baseline:#c7ccd4;
+--border:rgba(16,17,20,.10);--blue:#2a78d6;--orange:#e96832;--green:#159b6c;
+--amber:#d68a00;--track:#e9edf2;--warn-bg:#fff6df;--warn-text:#775100;
+--shadow:0 12px 35px rgba(30,45,70,.06)}
+@media(prefers-color-scheme:dark){:root{color-scheme:dark;--page:#0d0f12;
+--surface:#181b20;--text:#f5f7fa;--secondary:#c2c7cf;--muted:#8e949e;
+--line:#2b3038;--baseline:#3b424c;--border:rgba(255,255,255,.10);
+--blue:#438ee8;--orange:#e36a39;--green:#22a879;--amber:#e4a11b;
+--track:#252a31;--warn-bg:#352b14;--warn-text:#ffd98d;
+--shadow:0 12px 35px rgba(0,0,0,.20)}}
+*{box-sizing:border-box}body{margin:0;padding:2.5rem 1.25rem 5rem;
+background:var(--page);color:var(--text);font:15px/1.6 system-ui,-apple-system,
+"Segoe UI",sans-serif}.wrap{max-width:72rem;margin:0 auto}header{margin-bottom:2.25rem}
+h1{font-size:1.8rem;line-height:1.2;margin:0 0 .55rem;letter-spacing:-.025em}
+.meta,.sub,.note{color:var(--secondary);font-size:.875rem}.meta{margin:0}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.84em;
+background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:.1em .35em}
+section{margin-bottom:2.8rem}h2{font-size:1.08rem;margin:0 0 .35rem;letter-spacing:-.01em}
+h2 .num{color:var(--muted);margin-right:.45rem}.sub{margin:0 0 1.1rem}
+.card,.tile,.scenario{background:var(--surface);border:1px solid var(--border);
+border-radius:12px;box-shadow:var(--shadow)}.card{padding:1.35rem 1.5rem}
+.hero{margin-bottom:1rem;background:linear-gradient(135deg,var(--surface),color-mix(in srgb,var(--blue) 7%,var(--surface)))}
+.hero .k,.tile .k,.scenario .k{color:var(--secondary);font-size:.78rem}
+.hero .v{font-size:3rem;font-weight:650;line-height:1;letter-spacing:-.04em;margin:.25rem 0}
+.hero .token{font-size:1rem;color:var(--blue);font-weight:600}.hero .foot{color:var(--secondary);font-size:.84rem;margin-top:.45rem}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:.75rem}
+.tile{padding:1rem 1.1rem}.tile .v{font-size:1.55rem;font-weight:650;line-height:1.2;margin-top:.2rem}
+.tile .foot{color:var(--muted);font-size:.74rem;margin-top:.25rem}
+.warn{background:var(--warn-bg);color:var(--warn-text);border:1px solid color-mix(in srgb,var(--amber) 35%,transparent);
+padding:.75rem 1rem;border-radius:9px;font-size:.88rem}.success-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:.75rem}
+.scenario{padding:1rem 1.1rem}.scenario-head{display:flex;justify-content:space-between;gap:1rem;align-items:flex-end}
+.scenario-value{font-size:1.65rem;font-weight:650;letter-spacing:-.025em}.token-value{font-size:.82rem;color:var(--secondary);text-align:right}
+.scenario p{color:var(--muted);font-size:.76rem;margin:.55rem 0 0}.mini-track,.track{background:var(--track);overflow:hidden}
+.mini-track{height:5px;border-radius:99px;margin-top:.8rem}.mini-track .fill,.fill{height:100%;background:var(--blue)}
+.stack{display:flex;gap:2px;height:26px;margin:.2rem 0 .85rem;overflow:hidden;border-radius:5px;background:var(--track)}
+.stack>span{position:relative;min-width:0}.in-label{position:absolute;inset:0;display:flex;align-items:center;padding-left:.6rem;
+font-size:.72rem;font-weight:650;color:#fff;white-space:nowrap}.legend{display:flex;flex-wrap:wrap;gap:.35rem 1.15rem;margin-bottom:1rem}
+.legend div{display:flex;align-items:center;gap:.42rem;font-size:.8rem;color:var(--secondary)}
+.swatch{width:10px;height:10px;border-radius:2px;display:inline-block;flex:none}.bars{display:grid;gap:.7rem;margin-bottom:1.15rem}
+.row{display:grid;grid-template-columns:minmax(8rem,13rem) 1fr auto;gap:.85rem;align-items:center}
+.row .name{font-size:.82rem;color:var(--secondary)}.track{height:18px;border-radius:0 4px 4px 0}
+.row .val{font-size:.82rem;font-weight:600;min-width:7rem;text-align:right;font-variant-numeric:tabular-nums}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin-top:.9rem}table{border-collapse:collapse;width:100%;min-width:46rem;font-size:.82rem}
+th,td{padding:.52rem .65rem;border-bottom:1px solid var(--line);white-space:nowrap;font-variant-numeric:tabular-nums}
+th{text-align:left;color:var(--secondary);font-size:.74rem;font-weight:650;border-bottom:1px solid var(--baseline)}
+td.n,th.n{text-align:right}.key{display:inline-flex;align-items:center;gap:.45rem}tbody tr:last-child td{border-bottom:0}
+.waste-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.75rem}
+.waste-item{padding:.9rem 1rem;border-left:3px solid var(--blue);background:var(--surface);border-radius:0 8px 8px 0}
+.waste-item.bad{border-color:var(--orange)}.waste-item .k{color:var(--secondary);font-size:.78rem}
+.waste-item .v{font-size:1.35rem;font-weight:650}.waste-item .foot{color:var(--muted);font-size:.76rem}
+footer{border-top:1px solid var(--line);padding-top:1.4rem;color:var(--secondary);font-size:.82rem}
+footer h3{color:var(--text);font-size:.9rem;margin:1rem 0 .35rem}footer p{margin:.3rem 0}
+@media(max-width:42rem){body{padding:1.5rem .8rem 3rem}.card{padding:1rem}.hero .v{font-size:2.35rem}
+.row{grid-template-columns:6.5rem 1fr}.row .val{grid-column:2}.in-label{display:none}.scenario-head{display:block}.token-value{text-align:left;margin-top:.25rem}}
+</style></head><body><div class="wrap">
+<header><h1>Terminal-Bench Token Usage &amp; Cost</h1>
+<p class="meta">Run <code>sample-terminal-bench-v2.1</code> &middot;
+agent <code>xyne-cli</code> &middot; model <code>private-large</code><br>
+3 attempts/task &middot; generated 2026-08-03T15:30:00+05:30 &middot;
+agent version 0.3.3</p><p class="note">Priced at $1.4 input / $4.4 output / $0.26 cache read / $1.75 cache write per 1M tokens. Unspecified cache rates use the input rate.</p></header>
+<p class="warn"><strong>Lower bound.</strong> Totals are a LOWER BOUND: unmeasured attempts contribute 0 and are disproportionately the killed/timed-out (expensive) ones.</p>
+<section><div class="card hero"><div class="k">Cost per solved task, including failed retries</div>
+<div class="v">$0.7569</div>
+<div class="token">680,000 tokens per solved task</div>
+<div class="foot">2 tasks solved &middot; 10 trials &middot;
+$1.5138 custom-priced total</div></div>
+<div class="cards">
+<div class="tile"><div class="k">Total tokens</div><div class="v">1,360,000</div>
+<div class="foot">Measured run total</div></div>
+<div class="tile"><div class="k">Custom-priced cost</div><div class="v">$1.5138</div>
+<div class="foot">Billed upstream: $2.9200</div></div>
+<div class="tile"><div class="k">Tasks solved</div><div class="v">2</div>
+<div class="foot">3 successful trials</div></div>
+<div class="tile"><div class="k">Measurement coverage</div><div class="v">80.0%</div>
+<div class="foot">8/10 measured; 8 priceable</div></div>
+</div></section>
+
+<section><h2><span class="num">1</span>Token composition</h2>
+<p class="sub">Harbor input includes cache. Cache read and write are shown separately for transparent pricing.</p>
+<div class="cards">
+<div class="tile"><div class="k">Input including cache</div><div class="v">1,273,000</div></div>
+<div class="tile"><div class="k">Cache read</div><div class="v">624,000</div></div>
+<div class="tile"><div class="k">Cache write</div><div class="v">172,000</div></div>
+<div class="tile"><div class="k">Output</div><div class="v">87,000</div></div>
+</div></section>
+
+<section><h2><span class="num">2</span>Success economics</h2>
+<p class="sub">Three intentionally different views. Failed trials are isolated runs, so the successful-trial average excludes them.</p>
+<div class="success-grid"><div class="scenario"><div class="scenario-head"><div><div class="k">Including failed retries</div><div class="scenario-value">$0.7569</div></div><div class="token-value">680,000 tokens</div></div><div class="mini-track"><div class="fill" data-chart="success" style="width:100.00%"></div></div><p>All measured run usage divided by tasks solved at least once.</p></div><div class="scenario"><div class="scenario-head"><div><div class="k">Winning attempt only</div><div class="scenario-value">$0.1358</div></div><div class="token-value">121,900 tokens</div></div><div class="mini-track"><div class="fill" data-chart="success" style="width:17.94%"></div></div><p>Only the first successful attempt for each solved task.</p></div><div class="scenario"><div class="scenario-head"><div><div class="k">Average successful trial</div><div class="scenario-value">$0.1349</div></div><div class="token-value">123,133.3 tokens</div></div><div class="mini-track"><div class="fill" data-chart="success" style="width:17.82%"></div></div><p>3/3 successful trials measured; 3 priceable.</p></div></div>
+<p class="note">Successful-trial totals: 369,400 measured tokens and
+$0.4047 across 3 successful trials.</p></section>
+
+<section><h2><span class="num">3</span>Token usage by outcome</h2>
+<p class="sub">Share and volume of measured tokens. Exact token components and costs remain in the table.</p>
+<div class="card"><div class="stack"><span style="width:27.16%;background:var(--blue)"><span class="in-label">Solved 27.2%</span></span><span style="width:72.84%;background:var(--orange)"><span class="in-label">Unsolved 72.8%</span></span><span style="width:0.00%;background:var(--green)"></span></div>
+<div class="legend"><div><span class="swatch" style="background:var(--blue)"></span>Solved &mdash; 27.2%</div><div><span class="swatch" style="background:var(--orange)"></span>Unsolved &mdash; 72.8%</div><div><span class="swatch" style="background:var(--green)"></span>No grade &mdash; 0.0%</div></div><div class="bars"><div class="row"><div class="name">Solved</div><div class="track"><div class="fill" data-chart="outcome" style="width:37.29%;background:var(--blue)"></div></div><div class="val">369,400 tokens</div></div><div class="row"><div class="name">Unsolved</div><div class="track"><div class="fill" data-chart="outcome" style="width:100.00%;background:var(--orange)"></div></div><div class="val">990,600 tokens</div></div><div class="row"><div class="name">No grade</div><div class="track"><div class="fill" data-chart="outcome" style="width:0.00%;background:var(--green)"></div></div><div class="val">0 tokens</div></div></div>
+<div class="scroll"><table><thead><tr><th>Outcome</th><th class="n">Trials</th>
+<th class="n">Measured</th><th class="n">Priceable</th><th class="n">Input</th><th class="n">Cache read</th>
+<th class="n">Cache write</th><th class="n">Output</th><th class="n">Total</th>
+<th class="n">Avg tokens/trial</th><th class="n">Priced cost</th>
+<th class="n">Avg cost/trial</th><th class="n">Billed cost</th>
+</tr></thead><tbody><tr><td><span class="key"><span class="swatch" style="background:var(--blue)"></span>Solved</span></td><td class="n">3</td><td class="n">3</td><td class="n">3</td><td class="n">346,000</td><td class="n">174,000</td><td class="n">45,000</td><td class="n">23,400</td><td class="n">369,400</td><td class="n">123,133.3</td><td class="n">$0.4047</td><td class="n">$0.1349</td><td class="n">$0.8000</td></tr><tr><td><span class="key"><span class="swatch" style="background:var(--orange)"></span>Unsolved</span></td><td class="n">5</td><td class="n">5</td><td class="n">5</td><td class="n">927,000</td><td class="n">450,000</td><td class="n">127,000</td><td class="n">63,600</td><td class="n">990,600</td><td class="n">198,120</td><td class="n">$1.1091</td><td class="n">$0.2218</td><td class="n">$2.1200</td></tr><tr><td><span class="key"><span class="swatch" style="background:var(--green)"></span>No grade</span></td><td class="n">2</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">&mdash;</td><td class="n">&mdash;</td><td class="n">$0.0000</td></tr></tbody></table></div></div></section>
+
+<section><h2><span class="num">4</span>Economics by attempt round</h2>
+<p class="sub">Bars compare custom-priced cost per solve; the table retains every round-level token and cost metric.</p>
+<div class="card"><div class="bars"><div class="row"><div class="name">Attempt 1 &mdash; 1 solves</div><div class="track"><div class="fill" data-chart="round" style="width:100.00%;background:var(--blue)"></div></div><div class="val">$0.5871</div></div><div class="row"><div class="name">Attempt 2 &mdash; 1 solves</div><div class="track"><div class="fill" data-chart="round" style="width:98.87%;background:var(--blue)"></div></div><div class="val">$0.5805</div></div><div class="row"><div class="name">Attempt 3 &mdash; 1 solves</div><div class="track"><div class="fill" data-chart="round" style="width:58.98%;background:var(--blue)"></div></div><div class="val">$0.3463</div></div></div>
+<div class="scroll"><table><thead><tr><th>Round</th><th class="n">Trials</th><th class="n">Solves</th>
+<th class="n">Measured</th><th class="n">Priceable</th><th class="n">Input</th>
+<th class="n">Cache read</th><th class="n">Cache write</th><th class="n">Output</th>
+<th class="n">Total</th><th class="n">Avg tokens/trial</th><th class="n">Priced cost</th>
+<th class="n">Avg cost/trial</th><th class="n">Billed cost</th>
+<th class="n">Cost/solve</th></tr></thead><tbody><tr><td>Attempt 1</td><td class="n">4</td><td class="n">1</td><td class="n">3</td><td class="n">3</td><td class="n">495,000</td><td class="n">242,000</td><td class="n">67,000</td><td class="n">33,300</td><td class="n">528,300</td><td class="n">132,075</td><td class="n">$0.5871</td><td class="n">$0.1468</td><td class="n">$1.1300</td><td class="n">$0.5871</td></tr><tr><td>Attempt 2</td><td class="n">3</td><td class="n">1</td><td class="n">3</td><td class="n">3</td><td class="n">482,000</td><td class="n">235,000</td><td class="n">66,000</td><td class="n">34,200</td><td class="n">516,200</td><td class="n">172,066.7</td><td class="n">$0.5805</td><td class="n">$0.1935</td><td class="n">$1.1200</td><td class="n">$0.5805</td></tr><tr><td>Attempt 3</td><td class="n">3</td><td class="n">1</td><td class="n">2</td><td class="n">2</td><td class="n">296,000</td><td class="n">147,000</td><td class="n">39,000</td><td class="n">19,500</td><td class="n">315,500</td><td class="n">105,166.7</td><td class="n">$0.3463</td><td class="n">$0.1154</td><td class="n">$0.6700</td><td class="n">$0.3463</td></tr></tbody></table></div></div></section>
+
+<section><h2><span class="num">5</span>Attribution and waste</h2>
+<p class="sub">Winning-attempt usage is attributable to a solve; all other measured usage remains retry or unsolved spend.</p>
+<div class="waste-grid">
+<div class="waste-item"><div class="k">Attributable to solves</div><div class="v">$0.2715</div>
+<div class="foot">243,800 tokens</div></div>
+<div class="waste-item bad"><div class="k">Not attributable to solves</div><div class="v">$1.2423</div>
+<div class="foot">1,116,200 tokens &middot; 82.1% of custom-priced cost</div></div>
+</div></section>
+
+<section><h2><span class="num">6</span>Per task</h2>
+<p class="sub">All attempts remain visible alongside the first winning attempt. A zero winning value means the task was not solved.</p>
+<div class="card"><div class="scroll"><table><thead><tr><th>Task</th><th class="n">Trials</th>
+<th>Solved</th><th class="n">Measured</th><th class="n">Priceable</th>
+<th class="n">All tokens</th><th class="n">All cost</th><th class="n">Winning tokens</th>
+<th class="n">Winning cost</th></tr></thead><tbody><tr><td>database-recovery</td><td class="n">1</td><td>no</td><td class="n">0/1</td><td class="n">0/1</td><td class="n">0</td><td class="n">&mdash;</td><td class="n">0</td><td class="n">&mdash;</td></tr><tr><td>filesystem-repair</td><td class="n">3</td><td>yes</td><td class="n">3/3</td><td class="n">3/3</td><td class="n">463,600</td><td class="n">$0.5021</td><td class="n">141,000</td><td class="n">$0.1509</td></tr><tr><td>nginx-config</td><td class="n">3</td><td>yes</td><td class="n">2/3</td><td class="n">2/3</td><td class="n">263,100</td><td class="n">$0.3134</td><td class="n">102,800</td><td class="n">$0.1206</td></tr><tr><td>package-conflict</td><td class="n">3</td><td>no</td><td class="n">3/3</td><td class="n">3/3</td><td class="n">633,300</td><td class="n">$0.6984</td><td class="n">0</td><td class="n">&mdash;</td></tr></tbody></table></div></div></section>
+
+<footer><h3>Methodology</h3><p>Totals are a LOWER BOUND: unmeasured attempts contribute 0 and are disproportionately the killed/timed-out (expensive) ones.</p>
+<p><strong>Coverage quality:</strong> full 8 &middot; partial 0 &middot; total only 0 &middot; unmeasured 2.</p>
+<p>Custom prices are supplied with the run and are not provider-verified. Input includes cache;
+cache-read and cache-write rates are applied separately when available. Missing telemetry contributes no tokens,
+so incomplete-coverage totals are lower bounds.</p><h3>Metric definitions</h3>
+<p><strong>Including failed retries</strong> divides all measured run usage by tasks solved at least once.
+<strong>Winning attempt only</strong> uses the first successful trial per solved task.
+<strong>Average successful trial</strong> includes every independently successful trial and excludes failed trials.</p></footer>
+</div></body></html>
