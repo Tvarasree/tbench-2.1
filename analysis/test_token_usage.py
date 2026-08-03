@@ -150,6 +150,116 @@ class LoadAttemptsTest(unittest.TestCase):
             (trial / "result.json").write_text(json.dumps({"agent_result": None}))
             self.assertEqual(tu.load_attempts(run_dir)[0]["agent_version"], "")
 
+    def test_xyne_raw_sessions_fill_empty_harbor_context(self) -> None:
+        """The final reporter recovers usage when Harbor's hook ran too early."""
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = pathlib.Path(tmp)
+            make_trial(run_dir, "xyne-task__1", reward=1.0, tokens=None)
+            sessions = run_dir / "xyne-task__1" / "agent" / "sessions" / "-app"
+            sessions.mkdir(parents=True)
+            (sessions / "session.jsonl").write_text(
+                json.dumps({
+                    "type": "message",
+                    "message": {
+                        "role": "assistant",
+                        "usage": {
+                            "input": 100,
+                            "output": 20,
+                            "cacheRead": 300,
+                            "cacheWrite": 40,
+                            "cost": {"total": 0},
+                        },
+                    },
+                }) + "\n"
+            )
+
+            attempt = tu.load_attempts(run_dir, agent="xyne-cli")[0]
+
+            self.assertTrue(attempt["measured"])
+            self.assertEqual(attempt["usage_source"], "xyne-session-jsonl")
+            self.assertEqual(attempt["n_input_tokens"], 440)
+            self.assertEqual(attempt["n_cache_read_tokens"], 300)
+            self.assertEqual(attempt["n_cache_write_tokens"], 40)
+            self.assertEqual(attempt["n_output_tokens"], 20)
+
+    def test_supported_agent_raw_usage_overrides_lossy_harbor_context(self) -> None:
+        """Raw parsers preserve cache writes that Harbor 0.13.1 drops."""
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = pathlib.Path(tmp)
+            make_trial(run_dir, "opencode-task__1", reward=0.0,
+                       tokens=(400, 300, 20))
+            agent_dir = run_dir / "opencode-task__1" / "agent"
+            agent_dir.mkdir()
+            (agent_dir / "opencode.txt").write_text(json.dumps({
+                "type": "step_finish",
+                "part": {
+                    "tokens": {
+                        "input": 100,
+                        "output": 20,
+                        "cache": {"read": 300, "write": 40},
+                    },
+                    "cost": 0,
+                },
+            }) + "\n")
+
+            attempt = tu.load_attempts(run_dir, agent="opencode")[0]
+
+            self.assertEqual(attempt["usage_source"], "opencode-step-finish-jsonl")
+            self.assertEqual(attempt["n_input_tokens"], 440)
+            self.assertEqual(attempt["n_cache_read_tokens"], 300)
+            self.assertEqual(attempt["n_cache_write_tokens"], 40)
+
+    def test_goose_total_only_fallback_is_counted_but_not_priceable(self) -> None:
+        """Harbor 0.13.1 stores Goose total_tokens in its input field."""
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = pathlib.Path(tmp)
+            trial = run_dir / "goose-task__1"
+            trial.mkdir(parents=True)
+            (trial / "result.json").write_text(json.dumps({
+                "agent_info": {"name": "goose", "version": "1"},
+                "agent_result": {
+                    "n_input_tokens": 1234,
+                    "n_cache_tokens": None,
+                    "n_output_tokens": None,
+                    "cost_usd": None,
+                },
+            }))
+
+            attempt = tu.load_attempts(run_dir, agent="goose")[0]
+            aggregate = tu.aggregate([attempt], tu.Pricing(3.0, 15.0, None))
+
+            self.assertTrue(attempt["measured"])
+            self.assertEqual(attempt["measurement_quality"], "total_only")
+            self.assertFalse(attempt["priceable"])
+            self.assertEqual(attempt["n_input_tokens"], 0)
+            self.assertEqual(attempt["n_total_tokens"], 1234)
+            self.assertIsNone(attempt["cost_usd_priced"])
+            self.assertEqual(aggregate["coverage"]["priceable_attempts"], 0)
+            self.assertIsNone(aggregate["totals"]["cost_usd_priced"])
+            self.assertIsNone(
+                aggregate["cost_per_success"][
+                    "cost_usd_per_solve_including_failed_retries"
+                ]
+            )
+            self.assertEqual(
+                aggregate["coverage"]["quality_counts"]["total_only"], 1
+            )
+            report = {
+                "meta": {
+                    "eval_run_id": "goose-total-only",
+                    "agent": "goose",
+                    "model": "model",
+                    "attempts": 1,
+                    "generated_at": "now",
+                    "pricing_note": "test prices",
+                },
+                "aggregates": aggregate,
+                "attempts": [attempt],
+            }
+            html = pathlib.Path(tmp) / "token_usage.html"
+            tu.write_html(html, report)
+            self.assertIn("&mdash;", html.read_text())
+
 
 class AgentVersionReportingTest(unittest.TestCase):
     def test_mixed_versions_are_surfaced_not_averaged(self) -> None:
@@ -211,6 +321,29 @@ class PricingTest(unittest.TestCase):
 
     def test_unpriced_returns_none(self) -> None:
         self.assertIsNone(tu.Pricing(None, None, None).cost(1000, 0, 100))
+
+    def test_cache_write_has_its_own_optional_rate(self) -> None:
+        """1000 total input = 200 uncached + 600 read + 200 write.
+
+        200*3 + 600*0.30 + 200*3.75 + 100*15 = 3030 / 1e6.
+        """
+        pricing = tu.Pricing(3.0, 15.0, 0.30, 3.75)
+        self.assertAlmostEqual(
+            pricing.cost(1000, 600, 100, n_cache_write=200), 0.00303
+        )
+
+    def test_cache_write_defaults_to_input_rate(self) -> None:
+        """A read discount must not accidentally discount cache writes."""
+        pricing = tu.Pricing(3.0, 15.0, 0.30)
+        # 200 uncached*3 + 600 read*.3 + 200 write*3 + 100 output*15
+        self.assertAlmostEqual(
+            pricing.cost(1000, 600, 100, n_cache_write=200), 0.00288
+        )
+
+    def test_cache_prices_without_input_output_remain_unpriced(self) -> None:
+        pricing = tu.Pricing(None, None, 0.30, 3.75)
+        self.assertFalse(pricing.enabled)
+        self.assertIsNone(pricing.cost(1000, 600, 100, n_cache_write=200))
 
 
 class AggregateTest(unittest.TestCase):
@@ -356,6 +489,12 @@ class EmittersTest(unittest.TestCase):
             report = json.loads((out / "token_usage.json").read_text())
             self.assertFalse(report["meta"]["priced"])
             self.assertIn("NOT PRICED", report["meta"]["pricing_note"])
+            self.assertIsNone(
+                report["aggregates"]["totals"]["cost_usd_priced"]
+            )
+            self.assertIsNone(
+                report["aggregates"]["totals"]["cost_usd_billed"]
+            )
 
     def test_priced_run_emits_html_too(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -388,6 +527,8 @@ class EmittersTest(unittest.TestCase):
             rows = (out / "token_usage.csv").read_text().strip().splitlines()
             self.assertEqual(len(rows), 3)  # header + 2 attempts
             self.assertTrue(rows[0].startswith("task,attempt_index,trial"))
+            self.assertIn("usage_source", rows[0])
+            self.assertIn("measurement_quality", rows[0])
 
 
 class SessionUsageTest(unittest.TestCase):
@@ -427,13 +568,43 @@ class SessionUsageTest(unittest.TestCase):
             self.assertEqual(totals["cacheWrite"], 50)
             self.assertAlmostEqual(totals["cost"], 0.5)
 
+    def test_sums_xyne_0_3_4_nested_message_usage(self) -> None:
+        """Current xyne JSONL wraps role and usage under `message`."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions = pathlib.Path(tmp) / "sessions"
+            self._write_session(sessions, "a.jsonl", [
+                {"type": "session", "id": "abc", "cwd": "/app"},
+                {
+                    "type": "message",
+                    "message": {
+                        "role": "assistant",
+                        "usage": {
+                            "input": 120,
+                            "output": 30,
+                            "cacheRead": 400,
+                            "cacheWrite": 50,
+                            "cost": {"total": 0},
+                        },
+                    },
+                },
+            ])
+
+            totals = sum_session_usage(sessions)
+
+            self.assertIsNotNone(totals)
+            self.assertEqual(totals["messages"], 1)
+            self.assertEqual(totals["input"], 120)
+            self.assertEqual(totals["output"], 30)
+            self.assertEqual(totals["cacheRead"], 400)
+            self.assertEqual(totals["cacheWrite"], 50)
+
     def test_harbor_mapping_folds_cache_into_input(self) -> None:
         """harbor's n_input_tokens is input INCLUDING cache."""
         totals = {"input": 300, "output": 30, "cacheRead": 500,
                   "cacheWrite": 50, "cost": 0.5, "files": 1, "messages": 2}
         fields = to_harbor_fields(totals)
         self.assertEqual(fields["n_input_tokens"], 850)   # 300 + 500 + 50
-        self.assertEqual(fields["n_cache_tokens"], 550)   # 500 + 50
+        self.assertEqual(fields["n_cache_tokens"], 500)   # cache reads only
         self.assertEqual(fields["n_output_tokens"], 30)
         self.assertAlmostEqual(fields["cost_usd"], 0.5)
 

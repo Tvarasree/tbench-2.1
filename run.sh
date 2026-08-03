@@ -39,6 +39,8 @@ export PYTHONUNBUFFERED=1
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+# shellcheck disable=SC1091
+. "${SCRIPT_DIR}/scripts/heartbeat.sh"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 log_info()    { echo -e "${BLUE}[info]  $*${NC}"; }
@@ -85,6 +87,9 @@ Token pricing (all USD per 1,000,000 tokens; optional):
   --price-output RATE    Output-token rate.
   --price-cached RATE    Cached-read rate. Omit and cache reads bill at the
                          input rate (overstates cost when caching is active).
+  --price-cache-write RATE
+                         Cache-write rate. Omit and cache writes bill at the
+                         input rate.
 
 Misc:
   --agent-timeout MULT   Scale per-task agent timeout (harbor multiplier)
@@ -134,6 +139,7 @@ LOG_LEVEL="info"
 PRICE_INPUT=""
 PRICE_OUTPUT=""
 PRICE_CACHED=""
+PRICE_CACHE_WRITE=""
 
 # ---------------------------------------------------------------------------
 # Named-flag parser. Known flags → vars; unknown → forwarded to harbor as-is
@@ -157,6 +163,7 @@ while [ $# -gt 0 ]; do
     --price-input)     PRICE_INPUT="$2";        shift 2 ;;
     --price-output)    PRICE_OUTPUT="$2";       shift 2 ;;
     --price-cached)    PRICE_CACHED="$2";       shift 2 ;;
+    --price-cache-write) PRICE_CACHE_WRITE="$2"; shift 2 ;;
     --log-level)       LOG_LEVEL="$2";          shift 2 ;;   # schema parity
     --help|-h)         print_usage; exit 0 ;;
     --*)
@@ -197,7 +204,23 @@ write_fallback_results() {
 JSON
   log_warn "Wrote fallback zero-metric results ($reason) → $RESULTS_FILE"
 }
-trap 'write_fallback_results "interrupted-or-error (exit $?)"' EXIT
+
+HB_PID=""
+stop_heartbeat() {
+  [ -n "$HB_PID" ] || return 0
+  kill "$HB_PID" 2>/dev/null || true
+  wait "$HB_PID" 2>/dev/null || true
+  HB_PID=""
+}
+
+cleanup_on_exit() {
+  local rc=$?
+  trap - EXIT
+  stop_heartbeat
+  write_fallback_results "interrupted-or-error (exit $rc)"
+  exit "$rc"
+}
+trap cleanup_on_exit EXIT
 
 # ---------------------------------------------------------------------------
 # API key. The positional wins; else an exported XYNE_API_KEY (manual).
@@ -294,7 +317,7 @@ echo "    agent-timeout: $([ -n "$AGENT_TIMEOUT_MULT" ] && echo "${AGENT_TIMEOUT
 echo "    base-url:    $BASE_URL"
 echo "    gar pre-pull: $([ "$USE_GAR" = 1 ] && echo yes || echo no)"
 echo "    pricing:     $( [ -n "$PRICE_INPUT" ] && [ -n "$PRICE_OUTPUT" ] \
-  && echo "in=\$${PRICE_INPUT} out=\$${PRICE_OUTPUT} cached=\$${PRICE_CACHED:-<input rate>} per 1M tokens" \
+  && echo "in=\$${PRICE_INPUT} out=\$${PRICE_OUTPUT} cache-read=\$${PRICE_CACHED:-<input rate>} cache-write=\$${PRICE_CACHE_WRITE:-<input rate>} per 1M tokens" \
   || echo "none (token counts reported unpriced)")"
 echo "    output:      $RESULTS_FILE"
 
@@ -453,39 +476,6 @@ TIMEOUT_FLAGS=()
 # trial + ~12 summary lines/hour, never a refresh flood.
 # ---------------------------------------------------------------------------
 EXPECTED_TRIALS=$((N_SEL * ATTEMPTS))
-heartbeat() {
-  local interval=30 summary_every=10 tick=0
-  local t name state reward done_n run_n now
-  local -A seen
-  while :; do
-    sleep "$interval" || return 0
-    tick=$((tick + 1))
-    done_n=0; run_n=0
-    now="$(date +%H:%M:%S)"
-    for t in "$RUN_DIR"/*/; do
-      [ -d "$t" ] || continue
-      name="$(basename "$t")"
-      if [ -f "${t}result.json" ]; then
-        state="done"; done_n=$((done_n + 1))
-      else
-        state="running"; run_n=$((run_n + 1))
-      fi
-      if [ "${seen[$name]:-}" != "$state" ]; then
-        if [ "$state" = "done" ]; then
-          reward=""
-          [ -f "${t}verifier/reward.txt" ] && reward="$(tr -d '\n' < "${t}verifier/reward.txt" 2>/dev/null)"
-          echo "    [hb ${now}] ${name}: finished  reward=${reward:-<none>}"
-        else
-          echo "    [hb ${now}] ${name}: started"
-        fi
-        seen[$name]="$state"
-      fi
-    done
-    if [ $((tick % summary_every)) -eq 0 ]; then
-      echo "    [hb ${now}] progress: ${done_n}/${EXPECTED_TRIALS} done, ${run_n} running, elapsed $((tick * interval / 60))m"
-    fi
-  done
-}
 
 # ---------------------------------------------------------------------------
 # harbor run (failure is captured, NOT fatal — we still write results).
@@ -506,7 +496,7 @@ harbor run \
   "${TIMEOUT_FLAGS[@]}" \
   "${EXTRA_HARBOR_FLAGS[@]}" \
   --yes || HARBOR_RC=$?
-kill "$HB_PID" 2>/dev/null; wait "$HB_PID" 2>/dev/null
+stop_heartbeat
 [ "$HARBOR_RC" -eq 0 ] && log_ok "harbor run finished" \
   || log_warn "harbor run exited $HARBOR_RC — aggregating whatever graded"
 
@@ -557,6 +547,7 @@ TOKEN_PRICE_FLAGS=()
 [ -n "$PRICE_INPUT" ]  && TOKEN_PRICE_FLAGS+=(--price-input  "$PRICE_INPUT")
 [ -n "$PRICE_OUTPUT" ] && TOKEN_PRICE_FLAGS+=(--price-output "$PRICE_OUTPUT")
 [ -n "$PRICE_CACHED" ] && TOKEN_PRICE_FLAGS+=(--price-cached "$PRICE_CACHED")
+[ -n "$PRICE_CACHE_WRITE" ] && TOKEN_PRICE_FLAGS+=(--price-cache-write "$PRICE_CACHE_WRITE")
 if [ ${#TOKEN_PRICE_FLAGS[@]} -eq 0 ]; then
   log_info "no --price-* supplied; token counts will be reported unpriced"
 fi
@@ -623,8 +614,10 @@ def token_usage_headline():
             "agent_versions": data["meta"].get("agent_versions", []),
             "pricing_note": data["meta"].get("pricing_note", ""),
             "measured_attempts": cov["measured_attempts"],
+            "priceable_attempts": cov.get("priceable_attempts", 0),
             "total_attempts": cov["total_attempts"],
             "measured_pct": cov["measured_pct"],
+            "measurement_quality": cov.get("quality_counts", {}),
             "coverage_note": cov["note"],
             "n_input_tokens": tot["n_input_tokens"],
             "n_cache_tokens": tot["n_cache_tokens"],

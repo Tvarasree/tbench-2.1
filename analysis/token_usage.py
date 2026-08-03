@@ -6,10 +6,16 @@ Reads only what the run already wrote to disk — no API calls, no extra
 instrumentation.
 
 Sources
+    {run_dir}/{trial}/agent/
+        Agent-native artifacts are preferred because Harbor 0.13.1 drops
+        cache-write fields for some agents and has no Aider token adapter.
+        Supported sources cover xyne-cli, claude-code, opencode, pi, aider,
+        goose, and codex.
+
     {run_dir}/{trial}/result.json
-        harbor's TrialResult. `agent_result` (an AgentContext) carries the
-        authoritative per-trial totals: n_input_tokens (input INCLUDING cache),
-        n_cache_tokens, n_output_tokens, cost_usd. Multi-step trials leave
+        Harbor fallback. `agent_result` (an AgentContext) carries per-trial
+        totals: n_input_tokens (input INCLUDING cache), n_cache_tokens,
+        n_output_tokens, cost_usd. Multi-step trials leave
         `agent_result` null and record one context per entry of `step_results`;
         both shapes are aggregated, mirroring harbor's own
         TrialResult.compute_token_cost_totals().
@@ -18,12 +24,11 @@ Sources
         The trial's score. reward >= 1 is a solve. A missing file is a
         no-grade, which is also how run.sh classifies it.
 
-Coverage is a first-class output. Not every agent populates the token fields:
-in harbor 0.13.1 claude-code, codex, opencode, pi and goose do, aider does not,
-and xyne-cli only does with the adapter's populate_context_post_run in place.
-Unmeasured trials are disproportionately the killed/timed-out ones — i.e. the
-expensive ones — so any total taken with coverage < 100% is a LOWER BOUND and
-is labelled as such.
+Coverage is a first-class output. Unmeasured trials are disproportionately the
+killed/timed-out ones — i.e. the expensive ones — so any total taken with
+coverage < 100% is a LOWER BOUND and is labelled as such. Measurements also
+carry `full`, `partial`, `total_only`, or `unmeasured` quality; only a full
+input/output split is eligible for custom pricing.
 
 Outputs (written to --out-dir)
     token_usage.json    per-attempt records + summary + coverage
@@ -34,14 +39,15 @@ Outputs (written to --out-dir)
 Pricing is optional and expressed in USD per 1,000,000 tokens. Supplying both
 --price-input and --price-output unlocks the priced report; supplying only one
 leaves the run unpriced with a stated reason rather than half-pricing it.
---price-cached is optional on top: when given, cache tokens are billed at that
-rate and the remainder at the input rate; when omitted, all input tokens
-(including cache) are billed at the input rate and the report says so.
+--price-cached and --price-cache-write are optional on top. Their respective
+tokens use the supplied rate, or the input rate when omitted. Without input
+and output prices, token reports are still emitted and money fields are null.
 
 Usage:
     python3 token_usage.py --run-dir DIR --out-dir DIR [--eval-run-id ID]
         [--agent A] [--model M] [--attempts N]
         [--price-input F] [--price-output F] [--price-cached F]
+        [--price-cache-write F]
 
 Exit code is always 0: a reporting failure must never fail an otherwise
 successful eval run.
@@ -56,6 +62,17 @@ import pathlib
 import sys
 from datetime import datetime, timezone
 from typing import Any
+
+_ADAPTER_DIR = pathlib.Path(__file__).resolve().parents[1] / "adapter"
+if str(_ADAPTER_DIR) not in sys.path:
+    sys.path.insert(0, str(_ADAPTER_DIR))
+
+from xyne_harbor_agent.session_usage import sum_session_usage  # noqa: E402
+
+try:  # Supports both `python analysis/token_usage.py` and package imports.
+    from .token_sources import parse_agent_usage
+except ImportError:  # pragma: no cover - exercised by standalone invocation
+    from token_sources import parse_agent_usage  # type: ignore[no-redef]
 
 MILLION = 1_000_000
 
@@ -97,8 +114,10 @@ def _contexts_from_result(result: Any) -> list[dict]:
     return []
 
 
-def _sum_contexts(contexts: list[dict]) -> tuple[int, int, int, float | None, bool]:
-    """Sum token/cost fields. Returns (input, cache, output, cost, measured).
+def _sum_contexts(
+    contexts: list[dict],
+) -> tuple[int, int, int, float | None, bool, set[str]]:
+    """Return input, cache, output, billed cost, measurement flag, and fields.
 
     `measured` is False when no context carried a single token field — an agent
     harbor does not instrument, or a trial that died before reporting. A context
@@ -108,11 +127,13 @@ def _sum_contexts(contexts: list[dict]) -> tuple[int, int, int, float | None, bo
     cost = 0.0
     saw_tokens = False
     saw_cost = False
+    observed_fields: set[str] = set()
     for ctx in contexts:
         for key in ("n_input_tokens", "n_cache_tokens", "n_output_tokens"):
             value = ctx.get(key)
             if isinstance(value, (int, float)):
                 saw_tokens = True
+                observed_fields.add(key)
                 if key == "n_input_tokens":
                     n_input += int(value)
                 elif key == "n_cache_tokens":
@@ -123,10 +144,17 @@ def _sum_contexts(contexts: list[dict]) -> tuple[int, int, int, float | None, bo
         if isinstance(value, (int, float)):
             saw_cost = True
             cost += float(value)
-    return n_input, n_cache, n_output, (cost if saw_cost else None), saw_tokens
+    return (
+        n_input,
+        n_cache,
+        n_output,
+        (cost if saw_cost else None),
+        saw_tokens,
+        observed_fields,
+    )
 
 
-def load_attempts(run_dir: pathlib.Path) -> list[dict]:
+def load_attempts(run_dir: pathlib.Path, agent: str = "") -> list[dict]:
     """One record per trial directory. A trial is one attempt at one task."""
     attempts: list[dict] = []
     if not run_dir.is_dir():
@@ -154,7 +182,9 @@ def load_attempts(run_dir: pathlib.Path) -> list[dict]:
 
         result = _read_json(trial_dir / "result.json")
         contexts = _contexts_from_result(result)
-        n_input, n_cache, n_output, cost, measured = _sum_contexts(contexts)
+        n_input, n_cache, n_output, cost, measured, observed_fields = _sum_contexts(
+            contexts
+        )
 
         # harbor fills AgentInfo.version from the agent's get_version_command()
         # (`xyne --version` for xyne-cli). setup.sh installs @xyne/xyne-cli
@@ -165,6 +195,58 @@ def load_attempts(run_dir: pathlib.Path) -> list[dict]:
         agent_info = result.get("agent_info") if isinstance(result, dict) else None
         if isinstance(agent_info, dict):
             agent_version = str(agent_info.get("version") or "")
+        result_agent = str(agent_info.get("name") or "") if isinstance(agent_info, dict) else ""
+
+        usage_source = "harbor-agent-context" if measured else "unmeasured"
+        measurement_quality = (
+            "full"
+            if {"n_input_tokens", "n_output_tokens"}.issubset(observed_fields)
+            else "partial" if measured else "unmeasured"
+        )
+        priceable = measurement_quality == "full"
+        total_override: int | None = None
+        n_cache_read = n_cache
+        n_cache_write = 0
+        selected_agent = agent or result_agent
+        if selected_agent == "goose" and observed_fields == {"n_input_tokens"}:
+            # Harbor 0.13.1 puts Goose's combined total in n_input_tokens.
+            # Preserve the count without lying about its input/output split.
+            total_override = n_input
+            n_input = n_cache = n_output = n_cache_read = 0
+            measurement_quality = "total_only"
+            priceable = False
+        # Xyne's raw transcript retains separate cache-read/cache-write fields
+        # that Harbor AgentContext cannot represent. Prefer it even when the
+        # adapter populated the lossy Harbor totals; it is also the recovery
+        # path when Harbor copied the logs after populate_context_post_run().
+        if selected_agent == "xyne-cli":
+            totals = sum_session_usage(trial_dir / "agent" / "sessions")
+            if totals is not None:
+                n_cache_read = totals["cacheRead"]
+                n_cache_write = totals["cacheWrite"]
+                n_cache = n_cache_read + n_cache_write
+                n_input = totals["input"] + n_cache
+                n_output = totals["output"]
+                cost = totals["cost"] or None
+                measured = True
+                usage_source = "xyne-session-jsonl"
+                measurement_quality = "full"
+                priceable = True
+                total_override = None
+        else:
+            raw_usage = parse_agent_usage(trial_dir, selected_agent)
+            if raw_usage is not None:
+                n_input = raw_usage.n_input_tokens
+                n_cache_read = raw_usage.n_cache_read_tokens
+                n_cache_write = raw_usage.n_cache_write_tokens
+                n_cache = n_cache_read + n_cache_write
+                n_output = raw_usage.n_output_tokens
+                cost = raw_usage.cost_usd
+                measured = True
+                usage_source = raw_usage.source
+                measurement_quality = raw_usage.quality
+                priceable = raw_usage.quality == "full"
+                total_override = None
 
         attempts.append(
             {
@@ -174,10 +256,17 @@ def load_attempts(run_dir: pathlib.Path) -> list[dict]:
                 "reward": reward,
                 "agent_version": agent_version,
                 "measured": measured,
+                "usage_source": usage_source,
+                "measurement_quality": measurement_quality,
+                "priceable": priceable,
                 "n_input_tokens": n_input,
                 "n_cache_tokens": n_cache,
+                "n_cache_read_tokens": n_cache_read,
+                "n_cache_write_tokens": n_cache_write,
                 "n_output_tokens": n_output,
-                "n_total_tokens": n_input + n_output,
+                "n_total_tokens": (
+                    total_override if total_override is not None else n_input + n_output
+                ),
                 "cost_usd_billed": cost,
             }
         )
@@ -202,18 +291,22 @@ class Pricing:
         price_input: float | None,
         price_output: float | None,
         price_cached: float | None,
+        price_cache_write: float | None = None,
     ) -> None:
         self.price_input = price_input
         self.price_output = price_output
         self.price_cached = price_cached
+        self.price_cache_write = price_cache_write
         self.enabled = bool(price_input) and bool(price_output)
 
         if self.enabled:
-            if price_cached:
+            if price_cached or price_cache_write:
+                read_rate = price_cached or price_input
+                write_rate = price_cache_write or price_input
                 self.note = (
                     f"Priced at ${price_input:g} input / ${price_output:g} output / "
-                    f"${price_cached:g} cached per 1M tokens. Cache tokens are billed "
-                    f"at the cached rate; the remaining input at the input rate."
+                    f"${read_rate:g} cache read / ${write_rate:g} cache write per "
+                    f"1M tokens. Unspecified cache rates use the input rate."
                 )
             else:
                 self.note = (
@@ -222,7 +315,7 @@ class Pricing:
                     f"(including cache reads) are billed at the input rate — this "
                     f"overstates cost when caching is active."
                 )
-        elif price_input or price_output or price_cached:
+        elif price_input or price_output or price_cached or price_cache_write:
             self.note = (
                 "NOT PRICED: both --price-input and --price-output are required. "
                 "A partial price list is never half-applied, because a half-priced "
@@ -231,20 +324,31 @@ class Pricing:
         else:
             self.note = (
                 "NOT PRICED: no --price-input/--price-output supplied. Token counts "
-                "below are exact; only money figures are absent."
+                "available from completed artifacts are still reported; money "
+                "figures are absent."
             )
 
-    def cost(self, n_input: int, n_cache: int, n_output: int) -> float | None:
+    def cost(
+        self,
+        n_input: int,
+        n_cache_read: int,
+        n_output: int,
+        n_cache_write: int = 0,
+    ) -> float | None:
         if not self.enabled:
             return None
-        cached_rate = self.price_cached if self.price_cached else self.price_input
+        cache_read_rate = self.price_cached if self.price_cached else self.price_input
+        cache_write_rate = (
+            self.price_cache_write if self.price_cache_write else self.price_input
+        )
         # n_input already includes cache (harbor's documented semantics), so the
         # uncached remainder is the difference. Clamp: a malformed context could
         # report more cache than input.
-        uncached = max(n_input - n_cache, 0)
+        uncached = max(n_input - n_cache_read - n_cache_write, 0)
         return (
             uncached * self.price_input
-            + n_cache * cached_rate
+            + n_cache_read * cache_read_rate
+            + n_cache_write * cache_write_rate
             + n_output * self.price_output
         ) / MILLION
 
@@ -256,8 +360,11 @@ def _blank_bucket() -> dict:
     return {
         "attempts": 0,
         "measured_attempts": 0,
+        "priceable_attempts": 0,
         "n_input_tokens": 0,
         "n_cache_tokens": 0,
+        "n_cache_read_tokens": 0,
+        "n_cache_write_tokens": 0,
         "n_output_tokens": 0,
         "n_total_tokens": 0,
         "cost_usd_billed": 0.0,
@@ -269,9 +376,13 @@ def _add(bucket: dict, record: dict) -> None:
     bucket["attempts"] += 1
     if record["measured"]:
         bucket["measured_attempts"] += 1
+    if record["priceable"]:
+        bucket["priceable_attempts"] += 1
     for key in (
         "n_input_tokens",
         "n_cache_tokens",
+        "n_cache_read_tokens",
+        "n_cache_write_tokens",
         "n_output_tokens",
         "n_total_tokens",
     ):
@@ -297,10 +408,15 @@ def _finish(bucket: dict) -> dict:
 
 def aggregate(attempts: list[dict], pricing: Pricing) -> dict:
     for record in attempts:
-        record["cost_usd_priced"] = pricing.cost(
-            record["n_input_tokens"],
-            record["n_cache_tokens"],
-            record["n_output_tokens"],
+        record["cost_usd_priced"] = (
+            pricing.cost(
+                record["n_input_tokens"],
+                record["n_cache_read_tokens"],
+                record["n_output_tokens"],
+                record["n_cache_write_tokens"],
+            )
+            if record["priceable"]
+            else None
         )
 
     total = _blank_bucket()
@@ -323,6 +439,7 @@ def aggregate(attempts: list[dict], pricing: Pricing) -> dict:
                 "attempts": 0,
                 "solved": False,
                 "measured_attempts": 0,
+                "priceable_attempts": 0,
                 "n_total_tokens_all_attempts": 0,
                 "cost_usd_all_attempts": 0.0,
                 "n_total_tokens_winning_attempt": 0,
@@ -331,6 +448,7 @@ def aggregate(attempts: list[dict], pricing: Pricing) -> dict:
         )
         task["attempts"] += 1
         task["measured_attempts"] += int(record["measured"])
+        task["priceable_attempts"] += int(record["priceable"])
         task["n_total_tokens_all_attempts"] += record["n_total_tokens"]
         task["cost_usd_all_attempts"] += record["cost_usd_priced"] or 0.0
         # The winning attempt is the FIRST solve; later attempts of an
@@ -355,20 +473,50 @@ def aggregate(attempts: list[dict], pricing: Pricing) -> dict:
     for bucket in by_round.values():
         solves = bucket.get("solves", 0)
         bucket["cost_usd_per_solve"] = (
-            round(bucket["cost_usd_priced"] / solves, 6) if solves else None
+            round(bucket["cost_usd_priced"] / solves, 6)
+            if solves and bucket["priceable_attempts"]
+            else None
         )
     for task in by_task.values():
         task["cost_usd_all_attempts"] = round(task["cost_usd_all_attempts"], 6)
         task["cost_usd_winning_attempt"] = round(task["cost_usd_winning_attempt"], 6)
+        if task["priceable_attempts"] == 0:
+            task["cost_usd_all_attempts"] = None
+            task["cost_usd_winning_attempt"] = None
 
     n_attempts = total["attempts"]
     n_measured = total["measured_attempts"]
+    n_priceable = sum(int(record["priceable"]) for record in attempts)
+    quality_counts = {
+        quality: sum(
+            int(record["measurement_quality"] == quality) for record in attempts
+        )
+        for quality in ("full", "partial", "total_only", "unmeasured")
+    }
     _finish(total)
+
+    for bucket in [total, *by_outcome.values(), *by_round.values()]:
+        if not pricing.enabled or bucket["priceable_attempts"] == 0:
+            bucket["cost_usd_priced"] = None
+            bucket["avg_cost_usd_per_attempt"] = None
+            if "cost_usd_per_solve" in bucket:
+                bucket["cost_usd_per_solve"] = None
+
+    if not pricing.enabled:
+        for task in by_task.values():
+            task["cost_usd_all_attempts"] = None
+            task["cost_usd_winning_attempt"] = None
+
+    if not any(record["cost_usd_billed"] is not None for record in attempts):
+        for bucket in [total, *by_outcome.values(), *by_round.values()]:
+            bucket["cost_usd_billed"] = None
 
     return {
         "coverage": {
             "measured_attempts": n_measured,
+            "priceable_attempts": n_priceable,
             "total_attempts": n_attempts,
+            "quality_counts": quality_counts,
             "measured_pct": (
                 round(100.0 * n_measured / n_attempts, 2) if n_attempts else 0.0
             ),
@@ -388,10 +536,12 @@ def aggregate(attempts: list[dict], pricing: Pricing) -> dict:
             "tasks_solved": n_solved,
             # Lead with this one: it is what a solve actually costs.
             "cost_usd_per_solve_including_failed_retries": (
-                round(cost_total / n_solved, 6) if n_solved else None
+                round(cost_total / n_solved, 6)
+                if pricing.enabled and n_priceable and n_solved else None
             ),
             "cost_usd_per_solve_winning_attempt_only": (
-                round(cost_winning / n_solved, 6) if n_solved else None
+                round(cost_winning / n_solved, 6)
+                if pricing.enabled and n_priceable and n_solved else None
             ),
             "tokens_per_solve_including_failed_retries": (
                 round(tokens_total / n_solved, 1) if n_solved else None
@@ -401,11 +551,16 @@ def aggregate(attempts: list[dict], pricing: Pricing) -> dict:
             ),
         },
         "waste": {
-            "cost_usd_attributable_to_a_solve": round(cost_winning, 6),
-            "cost_usd_wasted": round(cost_total - cost_winning, 6),
+            "cost_usd_attributable_to_a_solve": (
+                round(cost_winning, 6) if pricing.enabled and n_priceable else None
+            ),
+            "cost_usd_wasted": (
+                round(cost_total - cost_winning, 6)
+                if pricing.enabled and n_priceable else None
+            ),
             "wasted_pct": (
                 round(100.0 * (cost_total - cost_winning) / cost_total, 2)
-                if cost_total
+                if pricing.enabled and n_priceable and cost_total
                 else None
             ),
             "tokens_attributable_to_a_solve": tokens_winning,
@@ -434,8 +589,13 @@ def write_csv(path: pathlib.Path, attempts: list[dict]) -> None:
         "reward",
         "agent_version",
         "measured",
+        "usage_source",
+        "measurement_quality",
+        "priceable",
         "n_input_tokens",
         "n_cache_tokens",
+        "n_cache_read_tokens",
+        "n_cache_write_tokens",
         "n_output_tokens",
         "n_total_tokens",
         "cost_usd_billed",
@@ -473,7 +633,8 @@ def write_markdown(path: pathlib.Path, report: dict) -> None:
     add("")
     add(
         f"> **Coverage.** {cov['measured_attempts']}/{cov['total_attempts']} attempts "
-        f"measured ({cov['measured_pct']}%). {cov['note']}"
+        f"measured ({cov['measured_pct']}%); {cov['priceable_attempts']} have a full "
+        f"priceable split. {cov['note']}"
     )
     add("")
 
@@ -482,7 +643,8 @@ def write_markdown(path: pathlib.Path, report: dict) -> None:
     add("| Metric | Value |")
     add("|---|---|")
     add(f"| Input tokens (incl. cache) | {_fmt_int(totals['n_input_tokens'])} |")
-    add(f"| — of which cached | {_fmt_int(totals['n_cache_tokens'])} |")
+    add(f"| — cache read | {_fmt_int(totals['n_cache_read_tokens'])} |")
+    add(f"| — cache write | {_fmt_int(totals['n_cache_write_tokens'])} |")
     add(f"| Output tokens | {_fmt_int(totals['n_output_tokens'])} |")
     add(f"| Total tokens | {_fmt_int(totals['n_total_tokens'])} |")
     add(f"| Cost (as billed upstream) | {_fmt_usd(totals['cost_usd_billed'] or None)} |")
@@ -591,28 +753,31 @@ def write_html(path: pathlib.Path, report: dict) -> None:
             str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         )
 
+    def usd(value: float | None) -> str:
+        return "&mdash;" if value is None else f"${value:,.4f}"
+
     outcome_rows = "".join(
         "<tr><td>{o}</td><td>{a}</td><td>{tk:,}</td><td>{av:,.1f}</td>"
-        "<td>${c:,.4f}</td><td>${ac:,.4f}</td></tr>".format(
+        "<td>{c}</td><td>{ac}</td></tr>".format(
             o=esc(outcome),
             a=agg["by_outcome"][outcome]["attempts"],
             tk=agg["by_outcome"][outcome]["n_total_tokens"],
             av=agg["by_outcome"][outcome]["avg_total_tokens_per_attempt"],
-            c=agg["by_outcome"][outcome]["cost_usd_priced"],
-            ac=agg["by_outcome"][outcome]["avg_cost_usd_per_attempt"],
+            c=usd(agg["by_outcome"][outcome]["cost_usd_priced"]),
+            ac=usd(agg["by_outcome"][outcome]["avg_cost_usd_per_attempt"]),
         )
         for outcome in OUTCOMES
     )
     round_rows = "".join(
         "<tr><td>{r}</td><td>{a}</td><td>{s}</td><td>{tk:,}</td>"
-        "<td>${c:,.4f}</td><td>{cps}</td></tr>".format(
+        "<td>{c}</td><td>{cps}</td></tr>".format(
             r=esc(rnd),
             a=b["attempts"],
             s=b.get("solves", 0),
             tk=b["n_total_tokens"],
-            c=b["cost_usd_priced"],
+            c=usd(b["cost_usd_priced"]),
             cps=(
-                f"${b['cost_usd_per_solve']:,.4f}"
+                usd(b["cost_usd_per_solve"])
                 if b.get("cost_usd_per_solve") is not None
                 else "&mdash;"
             ),
@@ -621,12 +786,12 @@ def write_html(path: pathlib.Path, report: dict) -> None:
     )
     task_rows = "".join(
         "<tr><td>{n}</td><td>{a}</td><td>{s}</td><td>{tk:,}</td>"
-        "<td>${c:,.4f}</td></tr>".format(
+        "<td>{c}</td></tr>".format(
             n=esc(name),
             a=t["attempts"],
             s="yes" if t["solved"] else "no",
             tk=t["n_total_tokens_all_attempts"],
-            c=t["cost_usd_all_attempts"],
+            c=usd(t["cost_usd_all_attempts"]),
         )
         for name, t in agg["by_task"].items()
     )
@@ -682,7 +847,7 @@ def write_html(path: pathlib.Path, report: dict) -> None:
  <div class="card"><div class="k">Total tokens</div>
    <div class="v">{totals['n_total_tokens']:,}</div></div>
  <div class="card"><div class="k">Cost (priced)</div>
-   <div class="v">${totals['cost_usd_priced']:,.2f}</div></div>
+   <div class="v">{usd(totals['cost_usd_priced'])}</div></div>
  <div class="card"><div class="k">Tasks solved</div>
    <div class="v">{cps['tasks_solved']}</div></div>
  <div class="card"><div class="k">Coverage</div>
@@ -690,11 +855,11 @@ def write_html(path: pathlib.Path, report: dict) -> None:
 </div>
 <h2>Cost per success</h2>
 <p>Including failed retries: <strong class="big">
- ${cps['cost_usd_per_solve_including_failed_retries'] or 0:,.4f}</strong>
+ {usd(cps['cost_usd_per_solve_including_failed_retries'])}</strong>
  per solve &mdash; the honest figure. Winning attempt only:
- ${cps['cost_usd_per_solve_winning_attempt_only'] or 0:,.4f}.</p>
-<p>Spend that bought a solve: ${waste['cost_usd_attributable_to_a_solve']:,.4f}.
- <strong>Wasted: ${waste['cost_usd_wasted']:,.4f}</strong>
+ {usd(cps['cost_usd_per_solve_winning_attempt_only'])}.</p>
+<p>Spend that bought a solve: {usd(waste['cost_usd_attributable_to_a_solve'])}.
+ <strong>Wasted: {usd(waste['cost_usd_wasted'])}</strong>
  ({waste['wasted_pct'] if waste['wasted_pct'] is not None else 0}%).</p>
 <h2>By outcome</h2>
 <div class="scroll"><table>
@@ -760,6 +925,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--price-cached", type=float, default=None,
         help="USD per 1,000,000 cached-read tokens (optional)",
     )
+    parser.add_argument(
+        "--price-cache-write", type=float, default=None,
+        help="USD per 1,000,000 cache-write tokens (optional)",
+    )
     return parser.parse_args(argv)
 
 
@@ -769,8 +938,13 @@ def main(argv: list[str] | None = None) -> int:
     out_dir = pathlib.Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    pricing = Pricing(args.price_input, args.price_output, args.price_cached)
-    attempts = load_attempts(run_dir)
+    pricing = Pricing(
+        args.price_input,
+        args.price_output,
+        args.price_cached,
+        args.price_cache_write,
+    )
+    attempts = load_attempts(run_dir, agent=args.agent)
 
     if not attempts:
         print(f"[token-usage] no trial dirs under {run_dir} — nothing to report")
@@ -787,10 +961,11 @@ def main(argv: list[str] | None = None) -> int:
         "price_input_per_1m_usd": args.price_input,
         "price_output_per_1m_usd": args.price_output,
         "price_cached_per_1m_usd": args.price_cached,
+        "price_cache_write_per_1m_usd": args.price_cache_write,
         "pricing_note": pricing.note,
         "usage_source": (
-            "harbor TrialResult.agent_result (AgentContext) per trial; "
-            "outcomes from verifier/reward.txt"
+            "agent-native raw artifacts when available, otherwise Harbor "
+            "TrialResult.agent_result; outcomes from verifier/reward.txt"
         ),
     }
 
@@ -829,6 +1004,8 @@ def main(argv: list[str] | None = None) -> int:
         f"({cov['measured_pct']}%) | total tokens {totals['n_total_tokens']:,}"
         + (
             f" | cost ${totals['cost_usd_priced']:,.4f}"
+            if pricing.enabled and totals["cost_usd_priced"] is not None
+            else " | token split unavailable for pricing"
             if pricing.enabled
             else " | unpriced"
         )

@@ -5,12 +5,13 @@ harness installed. `agent.py` maps the totals onto harbor's AgentContext.
 
 xyne writes one JSON object per line into
 `<agent-dir>/sessions/<encoded-cwd>/<ts>_<id>.jsonl`. The first line is a
-SessionHeader; the rest are messages. Only assistant messages carry `usage`:
+SessionHeader; the rest are messages. Current versions wrap assistant messages,
+while xyne <=0.3.3 wrote the same fields at the top level:
 
-    {"role": "assistant",
+    {"type": "message", "message": {"role": "assistant",
      "usage": {"input": 1200, "output": 340, "cacheRead": 8000,
                "cacheWrite": 150, "totalTokens": 9690,
-               "cost": {"total": 0.0}}}
+               "cost": {"total": 0.0}}}}
 
 `input`, `cacheRead` and `cacheWrite` are disjoint counters — xyne sums them
 independently when it computes its own totals (`buildStateSnapshot` in
@@ -74,11 +75,17 @@ def sum_session_usage(sessions_dir: Path) -> dict | None:
                     continue
                 if not isinstance(record, dict):
                     continue
+                # xyne <=0.3.3 persisted the message fields at the top level;
+                # 0.3.4+ wraps them in {"type":"message","message":{...}}.
+                # Accept both so always-latest installs remain measurable.
+                message = record.get("message")
+                if not isinstance(message, dict):
+                    message = record
                 # Skips the leading SessionHeader and every non-assistant
                 # entry; only assistant messages carry usage.
-                if record.get("role") != "assistant":
+                if message.get("role") != "assistant":
                     continue
-                usage = record.get("usage")
+                usage = message.get("usage")
                 if not isinstance(usage, dict):
                     continue
                 totals["messages"] += 1
@@ -101,10 +108,13 @@ def to_harbor_fields(totals: dict) -> dict:
     harbor documents `n_input_tokens` as input *including* cache, so the cache
     counters are folded into it as well as reported separately.
     """
-    cache = totals["cacheRead"] + totals["cacheWrite"]
+    cache_read = totals["cacheRead"]
+    cache_write = totals["cacheWrite"]
     return {
-        "n_input_tokens": totals["input"] + cache,
-        "n_cache_tokens": cache,
+        "n_input_tokens": totals["input"] + cache_read + cache_write,
+        # Harbor's cache field is cache reads. Cache writes remain part of
+        # input and are retained separately by the raw-session reporter.
+        "n_cache_tokens": cache_read,
         "n_output_tokens": totals["output"],
         # xyne prices self-hosted grid.ai models at 0, so an all-zero cost means
         # "not priced upstream", not "free" — leave it unset and let the

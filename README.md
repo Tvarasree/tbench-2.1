@@ -146,32 +146,33 @@ also lands in `metrics.additional.token_usage`, so the run page shows totals
 without opening artifacts.
 
 ```bash
-./run.sh my-run-id --all --price-input 3 --price-output 15 --price-cached 0.3
+./run.sh my-run-id --all --price-input 3 --price-output 15 --price-cached 0.3 --price-cache-write 3.75
 ```
 
-All three are **USD per 1,000,000 tokens** and optional:
+All four are **USD per 1,000,000 tokens** and optional:
 
 * `--price-input` and `--price-output` are both required to price a run. One
   alone leaves it unpriced *with a stated reason* — a half-priced total is
   worse than no total.
-* `--price-cached` is optional on top. Given, cache tokens bill at that rate
-  and the remainder at the input rate; omitted, all input (including cache
-  reads) bills at the input rate, which overstates cost when caching is active.
-* Unpriced runs still report exact token counts, and harbor's as-billed
+* `--price-cached` is optional on top. Given, cache-read tokens bill at that
+  rate; omitted, they bill at the input rate.
+* `--price-cache-write` is also optional. Cache writes use this rate when
+  supplied and otherwise use the input rate. Reads and writes remain separate
+  in JSON, CSV, and Markdown output.
+* Unpriced runs still report every available token count, and Harbor's as-billed
   `cost_usd` is emitted either way.
 
-The report is built from harbor's own per-trial `result.json`
-(`agent_result` → `AgentContext`), joined to `verifier/reward.txt` for the
-outcome. The row is one **trial** = one attempt; retries join on the task. It
-reports totals, the solved-vs-unsolved split (compare the *per-attempt
-averages*, not the bucket totals), cost per solve both winning-attempt-only and
-including failed retries, wasted spend, and per-attempt-round cost-per-solve.
+The report prefers each agent's native artifact, preserving fields Harbor
+0.13.1 drops, then falls back to `result.json` (`AgentContext`). It supports
+`xyne-cli`, `claude-code`, `opencode`, `pi`, `aider`, `goose`, and `codex`.
+Every row records its source and measurement quality. Outcomes come from
+`verifier/reward.txt`; one row is one **trial** = one attempt.
 
-**Coverage is a first-class output.** Not every agent reports tokens: in harbor
-0.13.1 `claude-code`, `codex`, `opencode`, `pi` and `goose` do, **`aider` does
-not**, and `xyne-cli` does via the adapter's `populate_context_post_run`, which
-sums its session transcript. Any total taken at < 100% coverage is a lower
-bound and is labelled as one.
+**Coverage is a first-class output.** Killed trials can still lack a complete
+artifact, so any total taken at < 100% coverage is a lower bound and is
+labelled as one. Harbor 0.13.1's old Goose combined-total fallback is retained
+as `total_only`: it counts toward token coverage but is never custom-priced as
+input because its input/output split is unknown.
 
 > **Known limit.** xyne's session JSONL has no terminal summary record, so the
 > adapter sums per-message `usage` — the same way xyne computes its own totals.
@@ -183,7 +184,7 @@ Reporting is non-fatal and standalone-runnable over a finished job:
 ```bash
 python3 analysis/token_usage.py --run-dir logs/<job-id> --out-dir /tmp/report \
   --price-input 3 --price-output 15
-python3 -m unittest discover -s analysis -p 'test_*.py'   # 28 tests, stdlib only
+python3 -m unittest discover -s analysis -p 'test_*.py'   # 46 tests, stdlib only
 ```
 
 ---
@@ -202,10 +203,14 @@ terminal-bench/
 │       ├── agent.py            # install + `xyne prompt --yolo` + token capture
 │       └── session_usage.py    # session-JSONL parser (harbor-free, unit-tested)
 ├── analysis/
-│   ├── token_usage.py          # per-run token & cost report (stdlib only)
-│   ├── test_token_usage.py     # 28 tests over synthetic trial trees
+│   ├── token_sources.py        # native parsers for all seven offered agents
+│   ├── token_usage.py          # normalization, pricing, aggregation, emitters
+│   ├── test_token_sources.py   # native artifact parser regressions
+│   ├── test_token_usage.py     # end-to-end reporter regressions
+│   ├── test_heartbeat.py       # background-process cleanup regression
 │   └── report.py               # manual pass/fail taxonomy report (not run by run.sh)
 ├── scripts/
+│   ├── heartbeat.sh            # progress loop with explicit child cleanup
 │   ├── seed_gar_images.py      # ONE-TIME: task images → GAR (digest-verified)
 │   ├── make_dataset_tarball.sh # ONE-TIME: ~/.cache/harbor/tasks → GCS
 │   ├── pull_tb_images.py       # per-run: GAR → local (harbor-expected name)
