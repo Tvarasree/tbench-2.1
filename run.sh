@@ -537,8 +537,8 @@ fi
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Token usage & cost. Reads harbor's per-trial result.json (agent_result) plus
-# verifier/reward.txt and writes token_usage.{json,csv,md} into OUTPUT_DIR —
-# and .html when prices were supplied. Runs BEFORE the results aggregator so
+# verifier/reward.txt and writes token_usage.{json,csv,md,html} into OUTPUT_DIR.
+# Runs BEFORE the results aggregator so
 # that aggregator can fold a headline into metrics.additional in one write.
 #
 # Strictly non-fatal: an accounting failure must never cost us a graded run.
@@ -551,7 +551,7 @@ TOKEN_PRICE_FLAGS=()
 [ -n "$PRICE_CACHED" ] && TOKEN_PRICE_FLAGS+=(--price-cached "$PRICE_CACHED")
 [ -n "$PRICE_CACHE_WRITE" ] && TOKEN_PRICE_FLAGS+=(--price-cache-write "$PRICE_CACHE_WRITE")
 if [ ${#TOKEN_PRICE_FLAGS[@]} -eq 0 ]; then
-  log_info "no --price-* supplied; token counts will be reported unpriced"
+  log_info "no --price-* supplied; token counts and token-only HTML will be reported"
 fi
 python3 "${SCRIPT_DIR}/analysis/token_usage.py" \
   --run-dir "$RUN_DIR" \
@@ -613,7 +613,7 @@ echo "  <trial>/agent/                    — agent logs"
 echo "Results JSON (synced as repo/output/, parsed by the runner): $RESULTS_FILE"
 echo "Token usage (synced as repo/output/): ${OUTPUT_DIR}/token_usage.{json,csv,md}"
 [ -f "${OUTPUT_DIR}/token_usage.html" ] && \
-  echo "  priced report: ${OUTPUT_DIR}/token_usage.html"
+  echo "  HTML report: ${OUTPUT_DIR}/token_usage.html"
 
 # Exit 0 even if some tasks failed: the run COMPLETED and produced metrics.
 # Only a missing results file (handled above) is a real failure for the harness.

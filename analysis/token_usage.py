@@ -34,11 +34,12 @@ Outputs (written to --out-dir)
     token_usage.json    per-attempt records + summary + coverage
     token_usage.csv     flat, one row per attempt
     token_usage.md      readable tables
-    token_usage.html    priced visual report — only when prices are supplied
+    token_usage.html    visual report; cost-first when priced, token-first otherwise
 
 Pricing is optional and expressed in USD per 1,000,000 tokens. Supplying both
---price-input and --price-output unlocks the priced report; supplying only one
-leaves the run unpriced with a stated reason rather than half-pricing it.
+--price-input and --price-output unlocks cost views in the visual report;
+supplying only one leaves the run token-only with a stated reason rather than
+half-pricing it.
 --price-cached and --price-cache-write are optional on top. Their respective
 tokens use the supplied rate, or the input rate when omitted. Without input
 and output prices, token reports are still emitted and money fields are null.
@@ -493,6 +494,9 @@ def aggregate(attempts: list[dict], pricing: Pricing) -> dict:
         _finish(bucket)
     for bucket in by_round.values():
         solves = bucket.get("solves", 0)
+        bucket["tokens_per_solve"] = (
+            round(bucket["n_total_tokens"] / solves, 1) if solves else None
+        )
         bucket["cost_usd_per_solve"] = (
             round(bucket["cost_usd_priced"] / solves, 6)
             if solves and bucket["priceable_attempts"]
@@ -605,6 +609,11 @@ def aggregate(attempts: list[dict], pricing: Pricing) -> dict:
             ),
             "tokens_attributable_to_a_solve": tokens_winning,
             "tokens_wasted": tokens_total - tokens_winning,
+            "tokens_wasted_pct": (
+                round(100.0 * (tokens_total - tokens_winning) / tokens_total, 2)
+                if tokens_total
+                else None
+            ),
         },
     }
 
@@ -618,6 +627,24 @@ def _fmt_usd(value: float | None) -> str:
 
 def _fmt_int(value: Any) -> str:
     return f"{value:,}" if isinstance(value, (int, float)) else "—"
+
+
+def _fmt_html_tokens(value: Any) -> str:
+    """Compact token values for HTML only; machine-readable reports stay exact."""
+    if not isinstance(value, (int, float)):
+        return "—" if value is None else str(value)
+    if abs(value) < 1_000:
+        if isinstance(value, float) and value.is_integer():
+            return f"{int(value):,}"
+        return _fmt_int(value)
+
+    divisor, suffix = (
+        (1_000_000, "M") if abs(value) >= 1_000_000 else (1_000, "K")
+    )
+    scaled = round(value / divisor, 2)
+    if suffix == "K" and abs(scaled) >= 1_000:
+        scaled, suffix = round(value / 1_000_000, 2), "M"
+    return f"{scaled:.2f}".rstrip("0").rstrip(".") + suffix
 
 
 def write_csv(path: pathlib.Path, attempts: list[dict]) -> None:
@@ -787,13 +814,16 @@ def write_markdown(path: pathlib.Path, report: dict) -> None:
 
 
 def write_html(path: pathlib.Path, report: dict) -> None:
-    """Write a priced, self-contained visual report without changing metrics."""
+    """Write a self-contained cost-first or token-first visual report."""
     meta = report["meta"]
     agg = report["aggregates"]
     totals = agg["totals"]
     cov = agg["coverage"]
     cps = agg["cost_per_success"]
     waste = agg["waste"]
+    priced = bool(meta.get("priced"))
+    has_billed = totals["cost_usd_billed"] is not None
+    show_billed_column = priced or has_billed
 
     def esc(value: Any) -> str:
         return (
@@ -814,6 +844,12 @@ def write_html(path: pathlib.Path, report: dict) -> None:
         if isinstance(value, float) and not value.is_integer():
             return f"{value:,.1f}"
         return f"{int(value):,}"
+
+    def tokens(value: int | float | None) -> str:
+        return "&mdash;" if value is None else f"{_fmt_html_tokens(value)} tokens"
+
+    def percentage(value: int | float | None) -> str:
+        return "&mdash;" if value is None else f"{value:,.2f}"
 
     def width(value: int | float | None, peak: int | float | None) -> float:
         if value is None or peak is None or peak <= 0:
@@ -857,22 +893,31 @@ def write_html(path: pathlib.Path, report: dict) -> None:
             f'<div class="row"><div class="name">{label}</div>'
             f'<div class="track"><div class="fill" data-chart="outcome" style="width:'
             f'{width(bucket["n_total_tokens"], outcome_peak):.2f}%;background:{colour}">'
-            f'</div></div><div class="val">{number(bucket["n_total_tokens"])} tokens</div></div>'
+            f'</div></div><div class="val">{_fmt_html_tokens(bucket["n_total_tokens"])} tokens</div></div>'
         )
         outcome_rows.append(
             f'<tr><td><span class="key"><span class="swatch" style="background:{colour}">'
             f'</span>{label}</span></td><td class="n">{bucket["attempts"]}</td>'
             f'<td class="n">{bucket["measured_attempts"]}</td>'
             f'<td class="n">{bucket["priceable_attempts"]}</td>'
-            f'<td class="n">{number(bucket["n_input_tokens"])}</td>'
-            f'<td class="n">{number(bucket["n_cache_read_tokens"])}</td>'
-            f'<td class="n">{number(bucket["n_cache_write_tokens"])}</td>'
-            f'<td class="n">{number(bucket["n_output_tokens"])}</td>'
-            f'<td class="n">{number(bucket["n_total_tokens"])}</td>'
-            f'<td class="n">{number(bucket["avg_total_tokens_per_attempt"])}</td>'
-            f'<td class="n">{usd(bucket["cost_usd_priced"])}</td>'
-            f'<td class="n">{usd(bucket["avg_cost_usd_per_attempt"])}</td>'
-            f'<td class="n">{usd(bucket["cost_usd_billed"])}</td></tr>'
+            f'<td class="n">{_fmt_html_tokens(bucket["n_input_tokens"])}</td>'
+            f'<td class="n">{_fmt_html_tokens(bucket["n_cache_read_tokens"])}</td>'
+            f'<td class="n">{_fmt_html_tokens(bucket["n_cache_write_tokens"])}</td>'
+            f'<td class="n">{_fmt_html_tokens(bucket["n_output_tokens"])}</td>'
+            f'<td class="n">{_fmt_html_tokens(bucket["n_total_tokens"])}</td>'
+            f'<td class="n">{_fmt_html_tokens(bucket["avg_total_tokens_per_attempt"])}</td>'
+            + (
+                f'<td class="n">{usd(bucket["cost_usd_priced"])}</td>'
+                f'<td class="n">{usd(bucket["avg_cost_usd_per_attempt"])}</td>'
+                if priced
+                else ""
+            )
+            + (
+                f'<td class="n">{usd(bucket["cost_usd_billed"])}</td>'
+                if show_billed_column
+                else ""
+            )
+            + "</tr>"
         )
 
     success_scenarios = [
@@ -893,51 +938,82 @@ def write_html(path: pathlib.Path, report: dict) -> None:
             cps["avg_tokens_per_successful_trial"],
             cps["avg_cost_usd_per_successful_trial"],
             f'{cps["measured_successful_trials"]}/{cps["successful_trials"]} '
-            f'successful trials measured; {cps["priceable_successful_trials"]} priceable.',
+            + (
+                f'successful trials measured; {cps["priceable_successful_trials"]} priceable.'
+                if priced
+                else "successful trials measured."
+            ),
         ),
     ]
-    success_peak = max((cost or 0 for _, _, cost, _ in success_scenarios), default=0)
+    success_peak = max(
+        ((cost if priced else token_count) or 0 for _, token_count, cost, _ in success_scenarios),
+        default=0,
+    )
     success_cards = "".join(
         f'<div class="scenario"><div class="scenario-head"><div><div class="k">{label}</div>'
-        f'<div class="scenario-value">{usd(cost)}</div></div>'
-        f'<div class="token-value">{number(tokens)} tokens</div></div>'
+        f'<div class="scenario-value">{usd(cost) if priced else tokens(token_count)}</div></div>'
+        + (
+            f'<div class="token-value">{tokens(token_count)}</div>' if priced else ""
+        )
+        + "</div>"
         f'<div class="mini-track"><div class="fill" data-chart="success" '
-        f'style="width:{width(cost, success_peak):.2f}%">'
+        f'style="width:{width(cost if priced else token_count, success_peak):.2f}%">'
         f'</div></div><p>{esc(note)}</p></div>'
-        for label, tokens, cost, note in success_scenarios
+        for label, token_count, cost, note in success_scenarios
     )
 
     round_peak = max(
-        (bucket.get("cost_usd_per_solve") or 0 for bucket in agg["by_round"].values()),
+        (
+            (
+                bucket.get("cost_usd_per_solve")
+                if priced
+                else bucket.get("tokens_per_solve")
+            )
+            or 0
+            for bucket in agg["by_round"].values()
+        ),
         default=0,
     )
     round_bars: list[str] = []
     round_rows: list[str] = []
     for rnd, bucket in agg["by_round"].items():
         label = f"Attempt {esc(rnd)}"
+        round_value = (
+            bucket.get("cost_usd_per_solve")
+            if priced
+            else bucket.get("tokens_per_solve")
+        )
         round_bars.append(
             f'<div class="row"><div class="name">{label} &mdash; '
             f'{bucket.get("solves", 0)} solves</div><div class="track">'
             f'<div class="fill" data-chart="round" '
-            f'style="width:{width(bucket.get("cost_usd_per_solve"), round_peak):.2f}%;'
+            f'style="width:{width(round_value, round_peak):.2f}%;'
             f'background:var(--blue)"></div></div>'
-            f'<div class="val">{usd(bucket.get("cost_usd_per_solve"))}</div></div>'
+            f'<div class="val">{usd(round_value) if priced else tokens(round_value)}</div></div>'
         )
         round_rows.append(
             f'<tr><td>{label}</td><td class="n">{bucket["attempts"]}</td>'
             f'<td class="n">{bucket.get("solves", 0)}</td>'
             f'<td class="n">{bucket["measured_attempts"]}</td>'
             f'<td class="n">{bucket["priceable_attempts"]}</td>'
-            f'<td class="n">{number(bucket["n_input_tokens"])}</td>'
-            f'<td class="n">{number(bucket["n_cache_read_tokens"])}</td>'
-            f'<td class="n">{number(bucket["n_cache_write_tokens"])}</td>'
-            f'<td class="n">{number(bucket["n_output_tokens"])}</td>'
-            f'<td class="n">{number(bucket["n_total_tokens"])}</td>'
-            f'<td class="n">{number(bucket["avg_total_tokens_per_attempt"])}</td>'
-            f'<td class="n">{usd(bucket["cost_usd_priced"])}</td>'
-            f'<td class="n">{usd(bucket["avg_cost_usd_per_attempt"])}</td>'
-            f'<td class="n">{usd(bucket["cost_usd_billed"])}</td>'
-            f'<td class="n">{usd(bucket.get("cost_usd_per_solve"))}</td></tr>'
+            f'<td class="n">{_fmt_html_tokens(bucket["n_input_tokens"])}</td>'
+            f'<td class="n">{_fmt_html_tokens(bucket["n_cache_read_tokens"])}</td>'
+            f'<td class="n">{_fmt_html_tokens(bucket["n_cache_write_tokens"])}</td>'
+            f'<td class="n">{_fmt_html_tokens(bucket["n_output_tokens"])}</td>'
+            f'<td class="n">{_fmt_html_tokens(bucket["n_total_tokens"])}</td>'
+            f'<td class="n">{_fmt_html_tokens(bucket["avg_total_tokens_per_attempt"])}</td>'
+            + (
+                f'<td class="n">{usd(bucket["cost_usd_priced"])}</td>'
+                f'<td class="n">{usd(bucket["avg_cost_usd_per_attempt"])}</td>'
+                if priced
+                else ""
+            )
+            + (
+                f'<td class="n">{usd(bucket["cost_usd_billed"])}</td>'
+                if show_billed_column
+                else ""
+            )
+            + f'<td class="n">{usd(round_value) if priced else tokens(round_value)}</td></tr>'
         )
 
     task_rows = "".join(
@@ -945,10 +1021,19 @@ def write_html(path: pathlib.Path, report: dict) -> None:
         f'<td>{"yes" if task["solved"] else "no"}</td>'
         f'<td class="n">{task["measured_attempts"]}/{task["attempts"]}</td>'
         f'<td class="n">{task["priceable_attempts"]}/{task["attempts"]}</td>'
-        f'<td class="n">{number(task["n_total_tokens_all_attempts"])}</td>'
-        f'<td class="n">{usd(task["cost_usd_all_attempts"])}</td>'
-        f'<td class="n">{number(task["n_total_tokens_winning_attempt"])}</td>'
-        f'<td class="n">{usd(task["cost_usd_winning_attempt"] if task["solved"] else None)}</td></tr>'
+        f'<td class="n">{_fmt_html_tokens(task["n_total_tokens_all_attempts"])}</td>'
+        + (
+            f'<td class="n">{usd(task["cost_usd_all_attempts"])}</td>'
+            if priced
+            else ""
+        )
+        + f'<td class="n">{_fmt_html_tokens(task["n_total_tokens_winning_attempt"])}</td>'
+        + (
+            f'<td class="n">{usd(task["cost_usd_winning_attempt"] if task["solved"] else None)}</td>'
+            if priced
+            else ""
+        )
+        + "</tr>"
         for name, task in agg["by_task"].items()
     )
 
@@ -964,6 +1049,136 @@ def write_html(path: pathlib.Path, report: dict) -> None:
     )
     versions = meta.get("agent_versions") or []
     version_text = ", ".join(esc(version) for version in versions) or "not reported"
+
+    if priced:
+        report_title = "Terminal-Bench Token Usage &amp; Cost"
+        mode_label = "Custom-priced report"
+        hero_label = "Cost per solved task, including failed retries"
+        hero_value = usd(cps["cost_usd_per_solve_including_failed_retries"])
+        hero_secondary = (
+            f'<div class="token">'
+            f'{_fmt_html_tokens(cps["tokens_per_solve_including_failed_retries"])} '
+            f'tokens per solved task</div>'
+        )
+        hero_foot = (
+            f'{cps["tasks_solved"]} tasks solved &middot; {totals["attempts"]} trials '
+            f'&middot; {usd(totals["cost_usd_priced"])} custom-priced total'
+        )
+        pricing_tile = (
+            f'<div class="tile"><div class="k">Custom-priced cost</div>'
+            f'<div class="v">{usd(totals["cost_usd_priced"])}</div>'
+            f'<div class="foot">Billed upstream: {usd(totals["cost_usd_billed"])}</div></div>'
+        )
+        coverage_foot = (
+            f'{cov["measured_attempts"]}/{cov["total_attempts"]} measured; '
+            f'{cov["priceable_attempts"]} priceable'
+        )
+        successful_totals = (
+            f'<p class="note">Successful-trial totals: '
+            f'{_fmt_html_tokens(cps["tokens_successful_trials"])} measured tokens and\n'
+            f'{usd(cps["cost_usd_successful_trials"])} across '
+            f'{cps["successful_trials"]} successful trials.</p>'
+        )
+        outcome_sub = (
+            "Share and volume of measured tokens. Exact token components and "
+            "costs remain in the table."
+        )
+        outcome_cost_headers = (
+            '<th class="n">Priced cost</th><th class="n">Avg cost/trial</th>'
+        )
+        outcome_billed_header = '<th class="n">Billed cost</th>'
+        round_title = "Economics by attempt round"
+        round_sub = (
+            "Bars compare custom-priced cost per solve; the table retains every "
+            "round-level token and cost metric."
+        )
+        round_cost_headers = (
+            '<th class="n">Priced cost</th><th class="n">Avg cost/trial</th>'
+        )
+        round_billed_header = '<th class="n">Billed cost</th>'
+        round_value_header = '<th class="n">Cost/solve</th>'
+        waste_cards = (
+            f'<div class="waste-item"><div class="k">Attributable to solves</div>'
+            f'<div class="v">{usd(waste["cost_usd_attributable_to_a_solve"])}</div>\n'
+            f'<div class="foot">{_fmt_html_tokens(waste["tokens_attributable_to_a_solve"])} tokens</div></div>\n'
+            f'<div class="waste-item bad"><div class="k">Not attributable to solves</div>'
+            f'<div class="v">{usd(waste["cost_usd_wasted"])}</div>\n'
+            f'<div class="foot">{_fmt_html_tokens(waste["tokens_wasted"])} tokens &middot; '
+            f'{number(waste["wasted_pct"])}% of custom-priced cost</div></div>'
+        )
+        task_headers = (
+            '<th class="n">All tokens</th><th class="n">All cost</th>'
+            '<th class="n">Winning tokens</th><th class="n">Winning cost</th>'
+        )
+        methodology = (
+            "Custom prices are supplied with the run and are not provider-verified. "
+            "Input includes cache; cache-read and cache-write rates are applied "
+            "separately when available."
+        )
+    else:
+        report_title = "Terminal-Bench Token Usage"
+        mode_label = "Token-only report"
+        hero_label = "Tokens per solved task, including all trials"
+        hero_value = (
+            f'{tokens(cps["tokens_per_solve_including_failed_retries"])} per solved task'
+            if cps["tokens_per_solve_including_failed_retries"] is not None
+            else "&mdash;"
+        )
+        hero_secondary = ""
+        hero_foot = (
+            f'{cps["tasks_solved"]} tasks solved &middot; {totals["attempts"]} trials '
+            f'&middot; {mode_label}'
+        )
+        pricing_tile = (
+            f'<div class="tile"><div class="k">Upstream billed cost '
+            f'(secondary telemetry)</div><div class="v">'
+            f'{usd(totals["cost_usd_billed"])}</div>'
+            f'<div class="foot">Provider-reported; not used in comparisons</div></div>'
+            if has_billed
+            else ""
+        )
+        coverage_foot = (
+            f'{cov["measured_attempts"]}/{cov["total_attempts"]} measured; '
+            f'{cov["priceable_attempts"]} with full input/output split'
+        )
+        successful_totals = (
+            f'<p class="note">Successful-trial totals: '
+            f'{_fmt_html_tokens(cps["tokens_successful_trials"])} measured tokens across '
+            f'{cps["successful_trials"]} successful trials.</p>'
+        )
+        outcome_sub = (
+            "Share and volume of measured tokens. Exact token components remain "
+            "in the table."
+        )
+        outcome_cost_headers = ""
+        outcome_billed_header = (
+            '<th class="n">Upstream billed</th>' if has_billed else ""
+        )
+        round_title = "Efficiency by attempt round"
+        round_sub = (
+            "Bars compare measured tokens per successful trial in each attempt "
+            "round; exact token totals remain in the table."
+        )
+        round_cost_headers = ""
+        round_billed_header = (
+            '<th class="n">Upstream billed</th>' if has_billed else ""
+        )
+        round_value_header = '<th class="n">Tokens/solve</th>'
+        waste_cards = (
+            f'<div class="waste-item"><div class="k">Attributable to solves</div>'
+            f'<div class="v">{tokens(waste["tokens_attributable_to_a_solve"])}</div>\n'
+            f'<div class="foot">First winning attempts only</div></div>\n'
+            f'<div class="waste-item bad"><div class="k">Not attributable to solves</div>'
+            f'<div class="v">{tokens(waste["tokens_wasted"])}</div>\n'
+            f'<div class="foot">{percentage(waste["tokens_wasted_pct"])}% of measured tokens</div></div>'
+        )
+        task_headers = (
+            '<th class="n">All tokens</th><th class="n">Winning tokens</th>'
+        )
+        methodology = (
+            "Custom input and output prices were not both supplied, so monetary "
+            "comparisons are omitted and measured tokens are the primary unit."
+        )
 
     css = """
 :root{color-scheme:light;--page:#f8f9fb;--surface:#fff;--text:#101114;
@@ -1019,94 +1234,87 @@ td.n,th.n{text-align:right}.key{display:inline-flex;align-items:center;gap:.45re
 .waste-item .v{font-size:1.35rem;font-weight:650}.waste-item .foot{color:var(--muted);font-size:.76rem}
 footer{border-top:1px solid var(--line);padding-top:1.4rem;color:var(--secondary);font-size:.82rem}
 footer h3{color:var(--text);font-size:.9rem;margin:1rem 0 .35rem}footer p{margin:.3rem 0}
-@media(max-width:42rem){body{padding:1.5rem .8rem 3rem}.card{padding:1rem}.hero .v{font-size:2.35rem}
-.row{grid-template-columns:6.5rem 1fr}.row .val{grid-column:2}.in-label{display:none}.scenario-head{display:block}.token-value{text-align:left;margin-top:.25rem}}
+@media(max-width:42rem){body{padding:1.5rem .8rem 3rem}.wrap{min-width:0}
+.cards,.success-grid,.waste-grid{grid-template-columns:1fr}.card{padding:1rem}.hero .v{font-size:2.35rem}
+.hero .v,.scenario-value,.tile .v,.meta,.note,.sub{overflow-wrap:anywhere}
+.row{grid-template-columns:6.5rem 1fr}.row .val{grid-column:2;min-width:0;text-align:left}
+.in-label{display:none}.scenario-head{display:block}.token-value{text-align:left;margin-top:.25rem}}
 """
 
     path.write_text(
         f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Token usage &amp; cost &mdash; {esc(meta['eval_run_id'])}</title>
+<title>{report_title} &mdash; {esc(meta['eval_run_id'])}</title>
 <style>{css}</style></head><body><div class="wrap">
-<header><h1>Terminal-Bench Token Usage &amp; Cost</h1>
+<header><h1>{report_title}</h1>
 <p class="meta">Run <code>{esc(meta['eval_run_id'])}</code> &middot;
 agent <code>{esc(meta['agent'])}</code> &middot; model <code>{esc(meta['model'])}</code><br>
 {esc(meta['attempts'])} attempts/task &middot; generated {esc(meta['generated_at'])} &middot;
-agent version {version_text}</p><p class="note">{esc(meta['pricing_note'])}</p></header>
+agent version {version_text} &middot; {mode_label}</p><p class="note">{esc(meta['pricing_note'])}</p></header>
 {coverage_banner}
-<section><div class="card hero"><div class="k">Cost per solved task, including failed retries</div>
-<div class="v">{usd(cps['cost_usd_per_solve_including_failed_retries'])}</div>
-<div class="token">{number(cps['tokens_per_solve_including_failed_retries'])} tokens per solved task</div>
-<div class="foot">{cps['tasks_solved']} tasks solved &middot; {totals['attempts']} trials &middot;
-{usd(totals['cost_usd_priced'])} custom-priced total</div></div>
+<section><div class="card hero"><div class="k">{hero_label}</div>
+<div class="v">{hero_value}</div>
+{hero_secondary}
+<div class="foot">{hero_foot}</div></div>
 <div class="cards">
-<div class="tile"><div class="k">Total tokens</div><div class="v">{number(totals['n_total_tokens'])}</div>
+<div class="tile"><div class="k">Total tokens</div><div class="v">{_fmt_html_tokens(totals['n_total_tokens'])}</div>
 <div class="foot">Measured run total</div></div>
-<div class="tile"><div class="k">Custom-priced cost</div><div class="v">{usd(totals['cost_usd_priced'])}</div>
-<div class="foot">Billed upstream: {usd(totals['cost_usd_billed'])}</div></div>
+{pricing_tile}
 <div class="tile"><div class="k">Tasks solved</div><div class="v">{cps['tasks_solved']}</div>
 <div class="foot">{cps['successful_trials']} successful trials</div></div>
 <div class="tile"><div class="k">Measurement coverage</div><div class="v">{cov['measured_pct']}%</div>
-<div class="foot">{cov['measured_attempts']}/{cov['total_attempts']} measured; {cov['priceable_attempts']} priceable</div></div>
+<div class="foot">{coverage_foot}</div></div>
 </div></section>
 
 <section><h2><span class="num">1</span>Token composition</h2>
 <p class="sub">Harbor input includes cache. Cache read and write are shown separately for transparent pricing.</p>
 <div class="cards">
-<div class="tile"><div class="k">Input including cache</div><div class="v">{number(totals['n_input_tokens'])}</div></div>
-<div class="tile"><div class="k">Cache read</div><div class="v">{number(totals['n_cache_read_tokens'])}</div></div>
-<div class="tile"><div class="k">Cache write</div><div class="v">{number(totals['n_cache_write_tokens'])}</div></div>
-<div class="tile"><div class="k">Output</div><div class="v">{number(totals['n_output_tokens'])}</div></div>
+<div class="tile"><div class="k">Input including cache</div><div class="v">{_fmt_html_tokens(totals['n_input_tokens'])}</div></div>
+<div class="tile"><div class="k">Cache read</div><div class="v">{_fmt_html_tokens(totals['n_cache_read_tokens'])}</div></div>
+<div class="tile"><div class="k">Cache write</div><div class="v">{_fmt_html_tokens(totals['n_cache_write_tokens'])}</div></div>
+<div class="tile"><div class="k">Output</div><div class="v">{_fmt_html_tokens(totals['n_output_tokens'])}</div></div>
 </div></section>
 
 <section><h2><span class="num">2</span>Success economics</h2>
 <p class="sub">Three intentionally different views. Failed trials are isolated runs, so the successful-trial average excludes them.</p>
 <div class="success-grid">{success_cards}</div>
-<p class="note">Successful-trial totals: {number(cps['tokens_successful_trials'])} measured tokens and
-{usd(cps['cost_usd_successful_trials'])} across {cps['successful_trials']} successful trials.</p></section>
+{successful_totals}</section>
 
 <section><h2><span class="num">3</span>Token usage by outcome</h2>
-<p class="sub">Share and volume of measured tokens. Exact token components and costs remain in the table.</p>
+<p class="sub">{outcome_sub}</p>
 <div class="card"><div class="stack">{''.join(stack_segments)}</div>
 <div class="legend">{''.join(stack_legend)}</div><div class="bars">{''.join(outcome_bars)}</div>
 <div class="scroll"><table><thead><tr><th>Outcome</th><th class="n">Trials</th>
 <th class="n">Measured</th><th class="n">Priceable</th><th class="n">Input</th><th class="n">Cache read</th>
 <th class="n">Cache write</th><th class="n">Output</th><th class="n">Total</th>
-<th class="n">Avg tokens/trial</th><th class="n">Priced cost</th>
-<th class="n">Avg cost/trial</th><th class="n">Billed cost</th>
+<th class="n">Avg tokens/trial</th>{outcome_cost_headers}{outcome_billed_header}
 </tr></thead><tbody>{''.join(outcome_rows)}</tbody></table></div></div></section>
 
-<section><h2><span class="num">4</span>Economics by attempt round</h2>
-<p class="sub">Bars compare custom-priced cost per solve; the table retains every round-level token and cost metric.</p>
+<section><h2><span class="num">4</span>{round_title}</h2>
+<p class="sub">{round_sub}</p>
 <div class="card"><div class="bars">{''.join(round_bars)}</div>
 <div class="scroll"><table><thead><tr><th>Round</th><th class="n">Trials</th><th class="n">Solves</th>
 <th class="n">Measured</th><th class="n">Priceable</th><th class="n">Input</th>
 <th class="n">Cache read</th><th class="n">Cache write</th><th class="n">Output</th>
-<th class="n">Total</th><th class="n">Avg tokens/trial</th><th class="n">Priced cost</th>
-<th class="n">Avg cost/trial</th><th class="n">Billed cost</th>
-<th class="n">Cost/solve</th></tr></thead><tbody>{''.join(round_rows)}</tbody></table></div></div></section>
+<th class="n">Total</th><th class="n">Avg tokens/trial</th>{round_cost_headers}
+{round_billed_header}{round_value_header}</tr></thead><tbody>{''.join(round_rows)}</tbody></table></div></div></section>
 
 <section><h2><span class="num">5</span>Attribution and waste</h2>
 <p class="sub">Winning-attempt usage is attributable to a solve; all other measured usage remains retry or unsolved spend.</p>
 <div class="waste-grid">
-<div class="waste-item"><div class="k">Attributable to solves</div><div class="v">{usd(waste['cost_usd_attributable_to_a_solve'])}</div>
-<div class="foot">{number(waste['tokens_attributable_to_a_solve'])} tokens</div></div>
-<div class="waste-item bad"><div class="k">Not attributable to solves</div><div class="v">{usd(waste['cost_usd_wasted'])}</div>
-<div class="foot">{number(waste['tokens_wasted'])} tokens &middot; {number(waste['wasted_pct'])}% of custom-priced cost</div></div>
+{waste_cards}
 </div></section>
 
 <section><h2><span class="num">6</span>Per task</h2>
 <p class="sub">All attempts remain visible alongside the first winning attempt. A zero winning value means the task was not solved.</p>
 <div class="card"><div class="scroll"><table><thead><tr><th>Task</th><th class="n">Trials</th>
 <th>Solved</th><th class="n">Measured</th><th class="n">Priceable</th>
-<th class="n">All tokens</th><th class="n">All cost</th><th class="n">Winning tokens</th>
-<th class="n">Winning cost</th></tr></thead><tbody>{task_rows}</tbody></table></div></div></section>
+{task_headers}</tr></thead><tbody>{task_rows}</tbody></table></div></div></section>
 
 <footer><h3>Methodology</h3><p>{esc(cov['note'])}</p>
 <p><strong>Coverage quality:</strong> {quality_summary}.</p>
-<p>Custom prices are supplied with the run and are not provider-verified. Input includes cache;
-cache-read and cache-write rates are applied separately when available. Missing telemetry contributes no tokens,
+<p>{methodology} Missing telemetry contributes no tokens,
 so incomplete-coverage totals are lower bounds.</p><h3>Metric definitions</h3>
 <p><strong>Including failed retries</strong> divides all measured run usage by tasks solved at least once.
 <strong>Winning attempt only</strong> uses the first successful trial per solved task.
@@ -1220,14 +1428,12 @@ def main(argv: list[str] | None = None) -> int:
 
     write_csv(out_dir / "token_usage.csv", attempts)
     write_markdown(out_dir / "token_usage.md", report)
-    if pricing.enabled:
-        write_html(out_dir / "token_usage.html", report)
+    write_html(out_dir / "token_usage.html", report)
 
     cov = report["aggregates"]["coverage"]
     totals = report["aggregates"]["totals"]
     print(
-        f"[token-usage] → {out_dir}/token_usage.{{json,csv,md}}"
-        + (",html" if pricing.enabled else "")
+        f"[token-usage] → {out_dir}/token_usage.{{json,csv,md,html}}"
     )
     print(
         f"[token-usage] coverage {cov['measured_attempts']}/{cov['total_attempts']} "

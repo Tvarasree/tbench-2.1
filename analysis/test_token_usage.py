@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 import sys
 import tempfile
 import unittest
@@ -479,6 +480,7 @@ class AggregateTest(unittest.TestCase):
         waste = agg["waste"]
         self.assertEqual(waste["tokens_attributable_to_a_solve"], 200)
         self.assertEqual(waste["tokens_wasted"], 1000)
+        self.assertAlmostEqual(waste["tokens_wasted_pct"], 83.33, places=2)
         self.assertAlmostEqual(waste["cost_usd_wasted"], 0.001)
         self.assertAlmostEqual(waste["wasted_pct"], 83.33, places=2)
 
@@ -487,10 +489,23 @@ class AggregateTest(unittest.TestCase):
         rounds = agg["by_round"]
         self.assertEqual(rounds["1"]["attempts"], 2)
         self.assertEqual(rounds["1"]["solves"], 0)
+        self.assertIsNone(rounds["1"]["tokens_per_solve"])
         self.assertIsNone(rounds["1"]["cost_usd_per_solve"])
         self.assertEqual(rounds["2"]["solves"], 1)
         # Round 2 spent 200 + 400 = 600 tokens to buy one solve.
+        self.assertEqual(rounds["2"]["tokens_per_solve"], 600.0)
         self.assertAlmostEqual(rounds["2"]["cost_usd_per_solve"], 0.0006)
+
+    def test_zero_token_total_has_no_waste_percentage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = pathlib.Path(tmp)
+            make_trial(run_dir, "zero__1", reward=0.0, tokens=(0, 0, 0))
+            waste = tu.aggregate(
+                tu.load_attempts(run_dir), tu.Pricing(None, None, None)
+            )["waste"]
+
+        self.assertEqual(waste["tokens_wasted"], 0)
+        self.assertIsNone(waste["tokens_wasted_pct"])
 
     def test_first_solve_is_the_winning_attempt(self) -> None:
         """A later attempt on an already-solved task did not buy the solve."""
@@ -566,13 +581,70 @@ class EmittersTest(unittest.TestCase):
             ]
         return tu.main(argv)
 
-    def test_unpriced_run_emits_json_csv_md_but_no_html(self) -> None:
+    def test_html_token_formatter_uses_two_decimal_compact_units(self) -> None:
+        formatter = getattr(tu, "_fmt_html_tokens", None)
+        self.assertTrue(callable(formatter))
+        self.assertEqual(formatter(999), "999")
+        self.assertEqual(formatter(600.0), "600")
+        self.assertEqual(formatter(1_000), "1K")
+        self.assertEqual(formatter(12_350), "12.35K")
+        self.assertEqual(formatter(35_000), "35K")
+        self.assertEqual(formatter(999_999), "1M")
+        self.assertEqual(formatter(1_450_000), "1.45M")
+
+    def test_html_compacts_token_values_without_changing_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = pathlib.Path(tmp)
+            run_dir = out / "run"
+            run_dir.mkdir()
+            make_trial(
+                run_dir,
+                "large__1",
+                reward=1.0,
+                tokens=(1_450_000, 0, 0),
+            )
+
+            self.assertEqual(
+                tu.main(
+                    [
+                        "--run-dir", str(run_dir),
+                        "--out-dir", str(out),
+                        "--eval-run-id", "large-run",
+                    ]
+                ),
+                0,
+            )
+            html = (out / "token_usage.html").read_text(encoding="utf-8")
+            report = json.loads((out / "token_usage.json").read_text())
+
+        self.assertIn("1.45M tokens", html)
+        self.assertNotIn("1,450,000 tokens", html)
+        self.assertEqual(report["aggregates"]["totals"]["n_total_tokens"], 1_450_000)
+
+    def test_unpriced_run_emits_all_reports(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out = pathlib.Path(tmp)
             self.assertEqual(self._build(out, priced=False), 0)
-            for name in ("token_usage.json", "token_usage.csv", "token_usage.md"):
+            for name in (
+                "token_usage.json",
+                "token_usage.csv",
+                "token_usage.md",
+                "token_usage.html",
+            ):
                 self.assertTrue((out / name).is_file(), name)
-            self.assertFalse((out / "token_usage.html").exists())
+            html = (out / "token_usage.html").read_text(encoding="utf-8")
+            self.assertIn("Terminal-Bench Token Usage", html)
+            self.assertIn("Token-only report", html)
+            self.assertIn("Tokens per solved task, including all trials", html)
+            self.assertIn("600 tokens per solved task", html)
+            self.assertIn("Including failed retries", html)
+            self.assertIn("Winning attempt only", html)
+            self.assertIn("Average successful trial", html)
+            self.assertIn("Tokens/solve", html)
+            self.assertIn("66.67% of measured tokens", html)
+            self.assertNotIn("Custom-priced cost", html)
+            self.assertNotIn("Avg cost/trial", html)
+            self.assertNotIn("Cost/solve", html)
             report = json.loads((out / "token_usage.json").read_text())
             self.assertFalse(report["meta"]["priced"])
             self.assertIn("NOT PRICED", report["meta"]["pricing_note"])
@@ -585,6 +657,82 @@ class EmittersTest(unittest.TestCase):
             markdown = (out / "token_usage.md").read_text()
             self.assertIn("Average successful trial", markdown)
             self.assertIn("1/1 successful trials measured", markdown)
+
+    def test_upstream_cost_does_not_drive_unpriced_charts(self) -> None:
+        def render(root: pathlib.Path, billed: bool) -> str:
+            run_dir = root / "run"
+            run_dir.mkdir()
+            make_trial(
+                run_dir,
+                "alpha__1",
+                reward=1.0,
+                tokens=(100, 0, 100),
+                cost=9.0 if billed else None,
+            )
+            make_trial(
+                run_dir,
+                "beta__1",
+                reward=0.0,
+                tokens=(300, 0, 100),
+                cost=17.0 if billed else None,
+            )
+            report = tu.build_report(
+                tu.load_attempts(run_dir),
+                tu.Pricing(None, None, None),
+                {
+                    "eval_run_id": "billed" if billed else "no-billed",
+                    "agent": "xyne-cli",
+                    "model": "private-large",
+                    "attempts": "1",
+                    "generated_at": "2026-08-04T00:00:00Z",
+                    "pricing_note": "NOT PRICED",
+                    "priced": False,
+                    "agent_versions": [],
+                },
+            )
+            output = root / "token_usage.html"
+            tu.write_html(output, report)
+            return output.read_text(encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as billed_tmp:
+            billed_html = render(pathlib.Path(billed_tmp), billed=True)
+        with tempfile.TemporaryDirectory() as plain_tmp:
+            plain_html = render(pathlib.Path(plain_tmp), billed=False)
+
+        billed_widths = re.findall(
+            r'data-chart="success" style="width:([0-9.]+)%', billed_html
+        )
+        plain_widths = re.findall(
+            r'data-chart="success" style="width:([0-9.]+)%', plain_html
+        )
+        self.assertEqual(billed_widths, plain_widths)
+        self.assertTrue(billed_widths)
+        self.assertIn("Upstream billed cost (secondary telemetry)", billed_html)
+        self.assertNotIn("Upstream billed cost (secondary telemetry)", plain_html)
+
+    def test_partial_pricing_emits_token_only_html(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = pathlib.Path(tmp)
+            run_dir = out / "run"
+            run_dir.mkdir()
+            make_trial(run_dir, "alpha__1", reward=1.0, tokens=(100, 0, 100))
+
+            code = tu.main(
+                [
+                    "--run-dir", str(run_dir),
+                    "--out-dir", str(out),
+                    "--price-input", "3",
+                ]
+            )
+
+            self.assertEqual(code, 0)
+            self.assertTrue((out / "token_usage.html").is_file())
+            report = json.loads((out / "token_usage.json").read_text())
+            self.assertFalse(report["meta"]["priced"])
+            self.assertIn("NOT PRICED", report["meta"]["pricing_note"])
+            html = (out / "token_usage.html").read_text(encoding="utf-8")
+            self.assertIn("Token-only report", html)
+            self.assertNotIn("Custom-priced cost", html)
 
     def test_priced_run_emits_html_too(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -713,6 +861,52 @@ class EmittersTest(unittest.TestCase):
                 f'data-chart="{chart}" style="width:0.00%',
                 html,
             )
+
+    def test_unpriced_html_handles_zero_bars(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            run_dir = root / "run"
+            run_dir.mkdir()
+            make_trial(run_dir, "zero__1", reward=1.0, tokens=(0, 0, 0))
+            report = tu.build_report(
+                tu.load_attempts(run_dir),
+                tu.Pricing(None, None, None),
+                {
+                    "eval_run_id": "zero-run",
+                    "agent": "xyne-cli",
+                    "model": "private-large",
+                    "attempts": "1",
+                    "generated_at": "2026-08-04T00:00:00Z",
+                    "pricing_note": "NOT PRICED",
+                    "priced": False,
+                    "agent_versions": [],
+                },
+            )
+            output = root / "token_usage.html"
+            tu.write_html(output, report)
+            html = output.read_text(encoding="utf-8")
+
+        for chart in ("success", "outcome", "round"):
+            self.assertIn(
+                f'data-chart="{chart}" style="width:0.00%',
+                html,
+            )
+        self.assertIn("&mdash;% of measured tokens", html)
+
+    def test_html_mobile_css_prevents_horizontal_overflow(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = pathlib.Path(tmp)
+            self.assertEqual(self._build(out, priced=False), 0)
+            html = (out / "token_usage.html").read_text(encoding="utf-8")
+
+        self.assertIn(".wrap{min-width:0}", html)
+        self.assertIn(
+            ".cards,.success-grid,.waste-grid{grid-template-columns:1fr}", html
+        )
+        self.assertIn(
+            ".hero .v,.scenario-value,.tile .v,.meta,.note,.sub{overflow-wrap:anywhere}",
+            html,
+        )
 
     def test_empty_run_dir_exits_clean(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
