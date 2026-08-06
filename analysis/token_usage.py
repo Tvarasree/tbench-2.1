@@ -40,15 +40,14 @@ Pricing is optional and expressed in USD per 1,000,000 tokens. Supplying both
 --price-input and --price-output unlocks cost views in the visual report;
 supplying only one leaves the run token-only with a stated reason rather than
 half-pricing it.
---price-cached and --price-cache-write are optional on top. Their respective
-tokens use the supplied rate, or the input rate when omitted. Without input
-and output prices, token reports are still emitted and money fields are null.
+Every measured input token uses the input rate and every measured output token
+uses the output rate. Without both prices, token reports are still emitted and
+money fields are null.
 
 Usage:
     python3 token_usage.py --run-dir DIR --out-dir DIR [--eval-run-id ID]
         [--agent A] [--model M] [--attempts N]
-        [--price-input F] [--price-output F] [--price-cached F]
-        [--price-cache-write F]
+        [--price-input F] [--price-output F]
 
 Exit code is always 0: a reporting failure must never fail an otherwise
 successful eval run.
@@ -293,32 +292,17 @@ class Pricing:
         self,
         price_input: float | None,
         price_output: float | None,
-        price_cached: float | None,
-        price_cache_write: float | None = None,
     ) -> None:
         self.price_input = price_input
         self.price_output = price_output
-        self.price_cached = price_cached
-        self.price_cache_write = price_cache_write
         self.enabled = bool(price_input) and bool(price_output)
 
         if self.enabled:
-            if price_cached or price_cache_write:
-                read_rate = price_cached or price_input
-                write_rate = price_cache_write or price_input
-                self.note = (
-                    f"Priced at ${price_input:g} input / ${price_output:g} output / "
-                    f"${read_rate:g} cache read / ${write_rate:g} cache write per "
-                    f"1M tokens. Unspecified cache rates use the input rate."
-                )
-            else:
-                self.note = (
-                    f"Priced at ${price_input:g} input / ${price_output:g} output per "
-                    f"1M tokens. No cached rate supplied, so ALL input tokens "
-                    f"(including cache reads) are billed at the input rate — this "
-                    f"overstates cost when caching is active."
-                )
-        elif price_input or price_output or price_cached or price_cache_write:
+            self.note = (
+                f"Priced at ${price_input:g} input / ${price_output:g} output per "
+                f"1M tokens."
+            )
+        elif price_input or price_output:
             self.note = (
                 "NOT PRICED: both --price-input and --price-output are required. "
                 "A partial price list is never half-applied, because a half-priced "
@@ -334,24 +318,12 @@ class Pricing:
     def cost(
         self,
         n_input: int,
-        n_cache_read: int,
         n_output: int,
-        n_cache_write: int = 0,
     ) -> float | None:
         if not self.enabled:
             return None
-        cache_read_rate = self.price_cached if self.price_cached else self.price_input
-        cache_write_rate = (
-            self.price_cache_write if self.price_cache_write else self.price_input
-        )
-        # n_input already includes cache (harbor's documented semantics), so the
-        # uncached remainder is the difference. Clamp: a malformed context could
-        # report more cache than input.
-        uncached = max(n_input - n_cache_read - n_cache_write, 0)
         return (
-            uncached * self.price_input
-            + n_cache_read * cache_read_rate
-            + n_cache_write * cache_write_rate
+            n_input * self.price_input
             + n_output * self.price_output
         ) / MILLION
 
@@ -414,9 +386,7 @@ def aggregate(attempts: list[dict], pricing: Pricing) -> dict:
         record["cost_usd_priced"] = (
             pricing.cost(
                 record["n_input_tokens"],
-                record["n_cache_read_tokens"],
                 record["n_output_tokens"],
-                record["n_cache_write_tokens"],
             )
             if record["priceable"]
             else None
@@ -901,8 +871,6 @@ def write_html(path: pathlib.Path, report: dict) -> None:
             f'<td class="n">{bucket["measured_attempts"]}</td>'
             f'<td class="n">{bucket["priceable_attempts"]}</td>'
             f'<td class="n">{_fmt_html_tokens(bucket["n_input_tokens"])}</td>'
-            f'<td class="n">{_fmt_html_tokens(bucket["n_cache_read_tokens"])}</td>'
-            f'<td class="n">{_fmt_html_tokens(bucket["n_cache_write_tokens"])}</td>'
             f'<td class="n">{_fmt_html_tokens(bucket["n_output_tokens"])}</td>'
             f'<td class="n">{_fmt_html_tokens(bucket["n_total_tokens"])}</td>'
             f'<td class="n">{_fmt_html_tokens(bucket["avg_total_tokens_per_attempt"])}</td>'
@@ -983,13 +951,19 @@ def write_html(path: pathlib.Path, report: dict) -> None:
             if priced
             else bucket.get("tokens_per_solve")
         )
+        round_display = usd(round_value) if priced else tokens(round_value)
+        if priced:
+            round_display += (
+                f'<span class="token-value">'
+                f'{tokens(bucket.get("tokens_per_solve"))}</span>'
+            )
         round_bars.append(
             f'<div class="row"><div class="name">{label} &mdash; '
             f'{bucket.get("solves", 0)} solves</div><div class="track">'
             f'<div class="fill" data-chart="round" '
             f'style="width:{width(round_value, round_peak):.2f}%;'
             f'background:var(--blue)"></div></div>'
-            f'<div class="val">{usd(round_value) if priced else tokens(round_value)}</div></div>'
+            f'<div class="val">{round_display}</div></div>'
         )
         round_rows.append(
             f'<tr><td>{label}</td><td class="n">{bucket["attempts"]}</td>'
@@ -997,8 +971,6 @@ def write_html(path: pathlib.Path, report: dict) -> None:
             f'<td class="n">{bucket["measured_attempts"]}</td>'
             f'<td class="n">{bucket["priceable_attempts"]}</td>'
             f'<td class="n">{_fmt_html_tokens(bucket["n_input_tokens"])}</td>'
-            f'<td class="n">{_fmt_html_tokens(bucket["n_cache_read_tokens"])}</td>'
-            f'<td class="n">{_fmt_html_tokens(bucket["n_cache_write_tokens"])}</td>'
             f'<td class="n">{_fmt_html_tokens(bucket["n_output_tokens"])}</td>'
             f'<td class="n">{_fmt_html_tokens(bucket["n_total_tokens"])}</td>'
             f'<td class="n">{_fmt_html_tokens(bucket["avg_total_tokens_per_attempt"])}</td>'
@@ -1112,8 +1084,8 @@ def write_html(path: pathlib.Path, report: dict) -> None:
         )
         methodology = (
             "Custom prices are supplied with the run and are not provider-verified. "
-            "Input includes cache; cache-read and cache-write rates are applied "
-            "separately when available."
+            "Every measured input token uses the input rate and every measured "
+            "output token uses the output rate."
         )
     else:
         report_title = "Terminal-Bench Token Usage"
@@ -1213,7 +1185,7 @@ border-radius:12px;box-shadow:var(--shadow)}.card{padding:1.35rem 1.5rem}
 .warn{background:var(--warn-bg);color:var(--warn-text);border:1px solid color-mix(in srgb,var(--amber) 35%,transparent);
 padding:.75rem 1rem;border-radius:9px;font-size:.88rem}.success-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:.75rem}
 .scenario{padding:1rem 1.1rem}.scenario-head{display:flex;justify-content:space-between;gap:1rem;align-items:flex-end}
-.scenario-value{font-size:1.65rem;font-weight:650;letter-spacing:-.025em}.token-value{font-size:.82rem;color:var(--secondary);text-align:right}
+.scenario-value{font-size:1.65rem;font-weight:650;letter-spacing:-.025em}.token-value{display:block;font-size:.82rem;color:var(--secondary);text-align:right}
 .scenario p{color:var(--muted);font-size:.76rem;margin:.55rem 0 0}.mini-track,.track{background:var(--track);overflow:hidden}
 .mini-track{height:5px;border-radius:99px;margin-top:.8rem}.mini-track .fill,.fill{height:100%;background:var(--blue)}
 .stack{display:flex;gap:2px;height:26px;margin:.2rem 0 .85rem;overflow:hidden;border-radius:5px;background:var(--track)}
@@ -1268,11 +1240,9 @@ agent version {version_text} &middot; {mode_label}</p><p class="note">{esc(meta[
 </div></section>
 
 <section><h2><span class="num">1</span>Token composition</h2>
-<p class="sub">Harbor input includes cache. Cache read and write are shown separately for transparent pricing.</p>
+<p class="sub">Measured input and output token totals used by the report.</p>
 <div class="cards">
-<div class="tile"><div class="k">Input including cache</div><div class="v">{_fmt_html_tokens(totals['n_input_tokens'])}</div></div>
-<div class="tile"><div class="k">Cache read</div><div class="v">{_fmt_html_tokens(totals['n_cache_read_tokens'])}</div></div>
-<div class="tile"><div class="k">Cache write</div><div class="v">{_fmt_html_tokens(totals['n_cache_write_tokens'])}</div></div>
+<div class="tile"><div class="k">Input</div><div class="v">{_fmt_html_tokens(totals['n_input_tokens'])}</div></div>
 <div class="tile"><div class="k">Output</div><div class="v">{_fmt_html_tokens(totals['n_output_tokens'])}</div></div>
 </div></section>
 
@@ -1286,8 +1256,8 @@ agent version {version_text} &middot; {mode_label}</p><p class="note">{esc(meta[
 <div class="card"><div class="stack">{''.join(stack_segments)}</div>
 <div class="legend">{''.join(stack_legend)}</div><div class="bars">{''.join(outcome_bars)}</div>
 <div class="scroll"><table><thead><tr><th>Outcome</th><th class="n">Trials</th>
-<th class="n">Measured</th><th class="n">Priceable</th><th class="n">Input</th><th class="n">Cache read</th>
-<th class="n">Cache write</th><th class="n">Output</th><th class="n">Total</th>
+<th class="n">Measured</th><th class="n">Priceable</th><th class="n">Input</th>
+<th class="n">Output</th><th class="n">Total</th>
 <th class="n">Avg tokens/trial</th>{outcome_cost_headers}{outcome_billed_header}
 </tr></thead><tbody>{''.join(outcome_rows)}</tbody></table></div></div></section>
 
@@ -1296,7 +1266,7 @@ agent version {version_text} &middot; {mode_label}</p><p class="note">{esc(meta[
 <div class="card"><div class="bars">{''.join(round_bars)}</div>
 <div class="scroll"><table><thead><tr><th>Round</th><th class="n">Trials</th><th class="n">Solves</th>
 <th class="n">Measured</th><th class="n">Priceable</th><th class="n">Input</th>
-<th class="n">Cache read</th><th class="n">Cache write</th><th class="n">Output</th>
+<th class="n">Output</th>
 <th class="n">Total</th><th class="n">Avg tokens/trial</th>{round_cost_headers}
 {round_billed_header}{round_value_header}</tr></thead><tbody>{''.join(round_rows)}</tbody></table></div></div></section>
 
@@ -1359,14 +1329,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--price-output", type=float, default=None,
         help="USD per 1,000,000 output tokens",
     )
-    parser.add_argument(
-        "--price-cached", type=float, default=None,
-        help="USD per 1,000,000 cached-read tokens (optional)",
-    )
-    parser.add_argument(
-        "--price-cache-write", type=float, default=None,
-        help="USD per 1,000,000 cache-write tokens (optional)",
-    )
     return parser.parse_args(argv)
 
 
@@ -1379,8 +1341,6 @@ def main(argv: list[str] | None = None) -> int:
     pricing = Pricing(
         args.price_input,
         args.price_output,
-        args.price_cached,
-        args.price_cache_write,
     )
     attempts = load_attempts(run_dir, agent=args.agent)
 
@@ -1398,8 +1358,6 @@ def main(argv: list[str] | None = None) -> int:
         "priced": pricing.enabled,
         "price_input_per_1m_usd": args.price_input,
         "price_output_per_1m_usd": args.price_output,
-        "price_cached_per_1m_usd": args.price_cached,
-        "price_cache_write_per_1m_usd": args.price_cache_write,
         "pricing_note": pricing.note,
         "usage_source": (
             "agent-native raw artifacts when available, otherwise Harbor "

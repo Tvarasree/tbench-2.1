@@ -4,12 +4,12 @@
     "The AUTHORITATIVE copy is the evals.input_params column in the dashboard",
     "database — this file is documentation. Keep the two in sync.",
     "The eval-runner translates each field name '_' -> '-' and passes it to",
-    "run.sh as a named flag, so 'price_input' arrives as '--price-input'.",
+    "run.sh as a named flag, so 'input_token_price' arrives as",
+    "'--input-token-price'.",
     "Price fields are OPTIONAL and are USD per 1,000,000 tokens. Leave them at",
     "0 to get an unpriced report (available token counts are still shown). Both",
     "input and output must be non-zero for pricing to engage; one alone is never",
-    "half-applied. price_cached and price_cache_write are optional on top;",
-    "when omitted, their tokens bill at the input rate."
+    "half-applied. All input tokens are billed at the input rate."
   ],
   "fields": [
     {
@@ -80,7 +80,7 @@
       },
       "default": 0,
       "label": "Input price (USD / 1M tokens)",
-      "name": "price_input",
+      "name": "input_token_price",
       "required": false,
       "type": "number"
     },
@@ -91,29 +91,7 @@
       },
       "default": 0,
       "label": "Output price (USD / 1M tokens)",
-      "name": "price_output",
-      "required": false,
-      "type": "number"
-    },
-    {
-      "constraints": {
-        "max": 1000,
-        "min": 0
-      },
-      "default": 0,
-      "label": "Cached-read price (USD / 1M tokens)",
-      "name": "price_cached",
-      "required": false,
-      "type": "number"
-    },
-    {
-      "constraints": {
-        "max": 1000,
-        "min": 0
-      },
-      "default": 0,
-      "label": "Cache-write price (USD / 1M tokens)",
-      "name": "price_cache_write",
+      "name": "output_token_price",
       "required": false,
       "type": "number"
     }

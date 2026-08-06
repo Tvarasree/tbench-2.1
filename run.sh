@@ -82,14 +82,11 @@ Model & agent:
   --attempts N           harbor --n-attempts / pass@k (default: 3)
 
 Token pricing (all USD per 1,000,000 tokens; optional):
-  --price-input RATE     Input-token rate. Both input and output are required
+  --input-token-price RATE
+                         Input-token rate. Both input and output are required
                          for a priced report; one alone leaves it unpriced.
-  --price-output RATE    Output-token rate.
-  --price-cached RATE    Cached-read rate. Omit and cache reads bill at the
-                         input rate (overstates cost when caching is active).
-  --price-cache-write RATE
-                         Cache-write rate. Omit and cache writes bill at the
-                         input rate.
+  --output-token-price RATE
+                         Output-token rate.
 
 Misc:
   --agent-timeout MULT   Scale per-task agent timeout (harbor multiplier)
@@ -138,8 +135,6 @@ LOG_LEVEL="info"
 # strings so "unset" stays distinguishable from a deliberate 0.
 PRICE_INPUT=""
 PRICE_OUTPUT=""
-PRICE_CACHED=""
-PRICE_CACHE_WRITE=""
 
 # ---------------------------------------------------------------------------
 # Named-flag parser. Known flags → vars; unknown → forwarded to harbor as-is
@@ -160,10 +155,13 @@ while [ $# -gt 0 ]; do
     --dataset)         DATASET="$2";            shift 2 ;;
     --agent-timeout)   AGENT_TIMEOUT_MULT="$2"; shift 2 ;;
     --no-gar)          USE_GAR=0;               shift   ;;
-    --price-input)     PRICE_INPUT="$2";        shift 2 ;;
-    --price-output)    PRICE_OUTPUT="$2";       shift 2 ;;
-    --price-cached)    PRICE_CACHED="$2";       shift 2 ;;
-    --price-cache-write) PRICE_CACHE_WRITE="$2"; shift 2 ;;
+    --input-token-price|--price-input)
+                        PRICE_INPUT="$2";        shift 2 ;;
+    --output-token-price|--price-output)
+                        PRICE_OUTPUT="$2";       shift 2 ;;
+    # Compatibility sink for runs created from an older dashboard schema.
+    # Cache-specific pricing is intentionally unsupported and ignored.
+    --price-cached|--price-cache-write) shift 2 ;;
     --log-level)       LOG_LEVEL="$2";          shift 2 ;;   # schema parity
     --help|-h)         print_usage; exit 0 ;;
     --*)
@@ -319,7 +317,7 @@ echo "    agent-timeout: $([ -n "$AGENT_TIMEOUT_MULT" ] && echo "${AGENT_TIMEOUT
 echo "    base-url:    $BASE_URL"
 echo "    gar pre-pull: $([ "$USE_GAR" = 1 ] && echo yes || echo no)"
 echo "    pricing:     $( [ -n "$PRICE_INPUT" ] && [ -n "$PRICE_OUTPUT" ] \
-  && echo "in=\$${PRICE_INPUT} out=\$${PRICE_OUTPUT} cache-read=\$${PRICE_CACHED:-<input rate>} cache-write=\$${PRICE_CACHE_WRITE:-<input rate>} per 1M tokens" \
+  && echo "in=\$${PRICE_INPUT} out=\$${PRICE_OUTPUT} per 1M tokens" \
   || echo "none (token counts reported unpriced)")"
 echo "    output:      $RESULTS_FILE"
 
@@ -548,8 +546,6 @@ TOKEN_USAGE_JSON="${OUTPUT_DIR}/token_usage.json"
 TOKEN_PRICE_FLAGS=()
 [ -n "$PRICE_INPUT" ]  && TOKEN_PRICE_FLAGS+=(--price-input  "$PRICE_INPUT")
 [ -n "$PRICE_OUTPUT" ] && TOKEN_PRICE_FLAGS+=(--price-output "$PRICE_OUTPUT")
-[ -n "$PRICE_CACHED" ] && TOKEN_PRICE_FLAGS+=(--price-cached "$PRICE_CACHED")
-[ -n "$PRICE_CACHE_WRITE" ] && TOKEN_PRICE_FLAGS+=(--price-cache-write "$PRICE_CACHE_WRITE")
 if [ ${#TOKEN_PRICE_FLAGS[@]} -eq 0 ]; then
   log_info "no --price-* supplied; token counts and token-only HTML will be reported"
 fi

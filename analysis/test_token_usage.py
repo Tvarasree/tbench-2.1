@@ -238,7 +238,7 @@ class LoadAttemptsTest(unittest.TestCase):
             }))
 
             attempt = tu.load_attempts(run_dir, agent="goose")[0]
-            aggregate = tu.aggregate([attempt], tu.Pricing(3.0, 15.0, None))
+            aggregate = tu.aggregate([attempt], tu.Pricing(3.0, 15.0))
 
             self.assertTrue(attempt["measured"])
             self.assertEqual(attempt["measurement_quality"], "total_only")
@@ -306,56 +306,18 @@ class AgentVersionReportingTest(unittest.TestCase):
 class PricingTest(unittest.TestCase):
     def test_requires_both_input_and_output(self) -> None:
         """A partial price list is never half-applied."""
-        self.assertFalse(tu.Pricing(3.0, None, None).enabled)
-        self.assertFalse(tu.Pricing(None, 15.0, None).enabled)
-        self.assertIn("NOT PRICED", tu.Pricing(3.0, None, None).note)
-        self.assertTrue(tu.Pricing(3.0, 15.0, None).enabled)
+        self.assertFalse(tu.Pricing(3.0, None).enabled)
+        self.assertFalse(tu.Pricing(None, 15.0).enabled)
+        self.assertIn("NOT PRICED", tu.Pricing(3.0, None).note)
+        self.assertTrue(tu.Pricing(3.0, 15.0).enabled)
 
-    def test_cached_rate_applies_to_cache_remainder_at_input(self) -> None:
-        """1000 input incl. 800 cache, 100 output @ 3/15/0.30 per 1M.
-
-        uncached 200 * 3 + cache 800 * 0.30 + output 100 * 15
-          = 600 + 240 + 1500 = 2340 / 1e6 = 0.00234
-        """
-        pricing = tu.Pricing(3.0, 15.0, 0.30)
-        self.assertAlmostEqual(pricing.cost(1000, 800, 100), 0.00234)
-
-    def test_without_cached_rate_all_input_bills_at_input_rate(self) -> None:
-        """Same shape, no cached rate: 1000 * 3 + 100 * 15 = 4500 → 0.0045."""
-        pricing = tu.Pricing(3.0, 15.0, None)
-        self.assertAlmostEqual(pricing.cost(1000, 800, 100), 0.0045)
-        self.assertIn("overstates cost", pricing.note)
-
-    def test_cache_exceeding_input_is_clamped(self) -> None:
-        """A malformed context must not produce a negative charge."""
-        pricing = tu.Pricing(3.0, 15.0, 0.30)
-        self.assertGreaterEqual(pricing.cost(100, 900, 0), 0.0)
+    def test_all_input_uses_the_input_rate(self) -> None:
+        """1000 total input * 3 + 100 output * 15 = 4500 / 1M."""
+        pricing = tu.Pricing(3.0, 15.0)
+        self.assertAlmostEqual(pricing.cost(1000, 100), 0.0045)
 
     def test_unpriced_returns_none(self) -> None:
-        self.assertIsNone(tu.Pricing(None, None, None).cost(1000, 0, 100))
-
-    def test_cache_write_has_its_own_optional_rate(self) -> None:
-        """1000 total input = 200 uncached + 600 read + 200 write.
-
-        200*3 + 600*0.30 + 200*3.75 + 100*15 = 3030 / 1e6.
-        """
-        pricing = tu.Pricing(3.0, 15.0, 0.30, 3.75)
-        self.assertAlmostEqual(
-            pricing.cost(1000, 600, 100, n_cache_write=200), 0.00303
-        )
-
-    def test_cache_write_defaults_to_input_rate(self) -> None:
-        """A read discount must not accidentally discount cache writes."""
-        pricing = tu.Pricing(3.0, 15.0, 0.30)
-        # 200 uncached*3 + 600 read*.3 + 200 write*3 + 100 output*15
-        self.assertAlmostEqual(
-            pricing.cost(1000, 600, 100, n_cache_write=200), 0.00288
-        )
-
-    def test_cache_prices_without_input_output_remain_unpriced(self) -> None:
-        pricing = tu.Pricing(None, None, 0.30, 3.75)
-        self.assertFalse(pricing.enabled)
-        self.assertIsNone(pricing.cost(1000, 600, 100, n_cache_write=200))
+        self.assertIsNone(tu.Pricing(None, None).cost(1000, 100))
 
 
 class AggregateTest(unittest.TestCase):
@@ -380,7 +342,7 @@ class AggregateTest(unittest.TestCase):
             make_trial(run_dir, "beta__1", reward=0.0, tokens=(300, 0, 100))
             make_trial(run_dir, "beta__2", reward=0.0, tokens=(300, 0, 100))
             attempts = tu.load_attempts(run_dir)
-            return tu.aggregate(attempts, tu.Pricing(1.0, 1.0, None))
+            return tu.aggregate(attempts, tu.Pricing(1.0, 1.0))
 
     def test_totals_and_coverage(self) -> None:
         agg = self._run()
@@ -431,7 +393,7 @@ class AggregateTest(unittest.TestCase):
             run_dir = pathlib.Path(tmp)
             make_trial(run_dir, "a__1", reward=0.5, tokens=(80, 0, 20))
             success = tu.aggregate(
-                tu.load_attempts(run_dir), tu.Pricing(1.0, 1.0, None)
+                tu.load_attempts(run_dir), tu.Pricing(1.0, 1.0)
             )["cost_per_success"]
 
         self.assertEqual(success["tasks_solved"], 0)
@@ -449,7 +411,7 @@ class AggregateTest(unittest.TestCase):
             make_trial(run_dir, "b__1", reward=1.0, tokens=None)
             make_trial(run_dir, "b__2", reward=0.0, tokens=(400, 0, 100))
             success = tu.aggregate(
-                tu.load_attempts(run_dir), tu.Pricing(1.0, 1.0, None)
+                tu.load_attempts(run_dir), tu.Pricing(1.0, 1.0)
             )["cost_per_success"]
 
         self.assertEqual(success["successful_trials"], 3)
@@ -468,7 +430,7 @@ class AggregateTest(unittest.TestCase):
             run_dir = pathlib.Path(tmp)
             make_trial(run_dir, "a__1", reward=1.0, tokens=(80, 0, 20))
             success = tu.aggregate(
-                tu.load_attempts(run_dir), tu.Pricing(None, None, None)
+                tu.load_attempts(run_dir), tu.Pricing(None, None)
             )["cost_per_success"]
 
         self.assertEqual(success["avg_tokens_per_successful_trial"], 100.0)
@@ -501,7 +463,7 @@ class AggregateTest(unittest.TestCase):
             run_dir = pathlib.Path(tmp)
             make_trial(run_dir, "zero__1", reward=0.0, tokens=(0, 0, 0))
             waste = tu.aggregate(
-                tu.load_attempts(run_dir), tu.Pricing(None, None, None)
+                tu.load_attempts(run_dir), tu.Pricing(None, None)
             )["waste"]
 
         self.assertEqual(waste["tokens_wasted"], 0)
@@ -514,7 +476,7 @@ class AggregateTest(unittest.TestCase):
             make_trial(run_dir, "t__1", reward=1.0, tokens=(100, 0, 0))
             make_trial(run_dir, "t__2", reward=1.0, tokens=(900, 0, 0))
             agg = tu.aggregate(
-                tu.load_attempts(run_dir), tu.Pricing(1.0, 1.0, None)
+                tu.load_attempts(run_dir), tu.Pricing(1.0, 1.0)
             )
             self.assertEqual(
                 agg["by_task"]["t"]["n_total_tokens_winning_attempt"], 100
@@ -527,7 +489,7 @@ class AggregateTest(unittest.TestCase):
             make_trial(run_dir, "a__1", reward=1.0, tokens=(100, 0, 100))
             make_trial(run_dir, "b__1", reward=0.0, tokens=None)
             agg = tu.aggregate(
-                tu.load_attempts(run_dir), tu.Pricing(1.0, 1.0, None)
+                tu.load_attempts(run_dir), tu.Pricing(1.0, 1.0)
             )
             cov = agg["coverage"]
             self.assertFalse(cov["complete"])
@@ -540,7 +502,7 @@ class AggregateTest(unittest.TestCase):
             run_dir = pathlib.Path(tmp)
             make_trial(run_dir, "a__1", reward=0.0, tokens=(100, 0, 100))
             agg = tu.aggregate(
-                tu.load_attempts(run_dir), tu.Pricing(1.0, 1.0, None)
+                tu.load_attempts(run_dir), tu.Pricing(1.0, 1.0)
             )
             cps = agg["cost_per_success"]
             self.assertEqual(cps["tasks_solved"], 0)
@@ -577,7 +539,6 @@ class EmittersTest(unittest.TestCase):
             argv += [
                 "--price-input", "3",
                 "--price-output", "15",
-                "--price-cached", "0.3",
             ]
         return tu.main(argv)
 
@@ -678,7 +639,7 @@ class EmittersTest(unittest.TestCase):
             )
             report = tu.build_report(
                 tu.load_attempts(run_dir),
-                tu.Pricing(None, None, None),
+                tu.Pricing(None, None),
                 {
                     "eval_run_id": "billed" if billed else "no-billed",
                     "agent": "xyne-cli",
@@ -746,8 +707,11 @@ class EmittersTest(unittest.TestCase):
             self.assertIn("Winning attempt only", html)
             self.assertIn("Average successful trial", html)
             self.assertIn("1/1 successful trials measured", html)
-            self.assertIn("Cache read", html)
-            self.assertIn("Cache write", html)
+            self.assertNotIn("Cache read", html)
+            self.assertNotIn("Cache write", html)
+            self.assertIn(
+                '$0.0042<span class="token-value">600 tokens</span>', html
+            )
             for heading in (
                 "Priceable",
                 "Avg tokens/trial",
@@ -771,10 +735,9 @@ class EmittersTest(unittest.TestCase):
                 solved_row,
                 '<td class="n">1</td><td class="n">1</td>'
                 '<td class="n">1</td><td class="n">100</td>'
-                '<td class="n">40</td><td class="n">0</td>'
                 '<td class="n">100</td><td class="n">200</td>'
-                '<td class="n">200</td><td class="n">$0.0017</td>'
-                '<td class="n">$0.0017</td><td class="n">$0.0100</td>',
+                '<td class="n">200</td><td class="n">$0.0018</td>'
+                '<td class="n">$0.0018</td><td class="n">$0.0100</td>',
             )
             round_row = html.split("<tr><td>Attempt 1</td>", 1)[1].split(
                 "</tr>", 1
@@ -783,16 +746,15 @@ class EmittersTest(unittest.TestCase):
                 round_row,
                 '<td class="n">2</td><td class="n">1</td>'
                 '<td class="n">2</td><td class="n">2</td>'
-                '<td class="n">400</td><td class="n">40</td>'
-                '<td class="n">0</td><td class="n">200</td>'
+                '<td class="n">400</td><td class="n">200</td>'
                 '<td class="n">600</td><td class="n">300</td>'
-                '<td class="n">$0.0041</td><td class="n">$0.0020</td>'
-                '<td class="n">$0.0300</td><td class="n">$0.0041</td>',
+                '<td class="n">$0.0042</td><td class="n">$0.0021</td>'
+                '<td class="n">$0.0300</td><td class="n">$0.0042</td>',
             )
             self.assertIn("Billed upstream: $0.0300", html)
             self.assertIn(
                 "Successful-trial totals: 200 measured tokens and\n"
-                "$0.0017 across 1 successful trials.",
+                "$0.0018 across 1 successful trials.",
                 html,
             )
             self.assertIn(
@@ -800,15 +762,15 @@ class EmittersTest(unittest.TestCase):
                 "total only 0 &middot; unmeasured 0.",
                 html,
             )
-            self.assertIn("$0.0017</div>\n<div class=\"foot\">200 tokens", html)
+            self.assertIn("$0.0018</div>\n<div class=\"foot\">200 tokens", html)
             self.assertIn("$0.0024</div>\n<div class=\"foot\">400 tokens", html)
             report = json.loads((out / "token_usage.json").read_text())
             self.assertTrue(report["meta"]["priced"])
-            # alpha: 60 uncached*3 + 40 cache*0.3 + 100 out*15 = 180+12+1500 = 1692
-            # beta:  300*3 + 100*15 = 900 + 1500 = 2400
-            # total 4092 / 1e6
+            # alpha: 100 input*3 + 100 output*15 = 1800
+            # beta:  300 input*3 + 100 output*15 = 2400
+            # total 4200 / 1e6
             self.assertAlmostEqual(
-                report["aggregates"]["totals"]["cost_usd_priced"], 0.004092
+                report["aggregates"]["totals"]["cost_usd_priced"], 0.0042
             )
 
     def test_html_escapes_artifact_labels_and_handles_zero_bars(self) -> None:
@@ -826,7 +788,7 @@ class EmittersTest(unittest.TestCase):
             attempts = tu.load_attempts(run_dir)
             report = tu.build_report(
                 attempts,
-                tu.Pricing(1.0, 1.0, None),
+                tu.Pricing(1.0, 1.0),
                 {
                     "eval_run_id": "<unsafe-run>",
                     "agent": "<unsafe-agent>",
@@ -870,7 +832,7 @@ class EmittersTest(unittest.TestCase):
             make_trial(run_dir, "zero__1", reward=1.0, tokens=(0, 0, 0))
             report = tu.build_report(
                 tu.load_attempts(run_dir),
-                tu.Pricing(None, None, None),
+                tu.Pricing(None, None),
                 {
                     "eval_run_id": "zero-run",
                     "agent": "xyne-cli",
