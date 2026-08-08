@@ -222,6 +222,25 @@ cleanup_on_exit() {
 }
 trap cleanup_on_exit EXIT
 
+# Fail before pulling task images or launching Harbor if the selected custom
+# adapter cannot load in the exact Harbor tool environment provisioned above.
+verify_selected_adapter() {
+  local module=""
+  case "$AGENT" in
+    xyne-cli) module="xyne_harbor_agent.agent" ;;
+    pi)       module="pi_harbor_agent.agent" ;;
+    *)        return 0 ;;
+  esac
+
+  if ! uv tool run --from harbor python -c "import ${module}" >/dev/null 2>&1; then
+    log_err "Selected agent adapter cannot import: ${module}"
+    return 1
+  fi
+  log_ok "Selected agent adapter verified: ${module}"
+}
+
+verify_selected_adapter || exit 1
+
 # ---------------------------------------------------------------------------
 # API key. The positional wins; else an exported XYNE_API_KEY (manual).
 # ---------------------------------------------------------------------------

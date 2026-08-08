@@ -10,9 +10,8 @@
 # no sudo and a read-only root fs, so gcloud is installed under /var/lib/docker
 # (a writable data partition), exactly like swe-auto-eval.
 #
-# setup.sh is pure provisioning: it IGNORES the [API_KEY] EVAL_RUN_ID [--flags]
-# argv the eval-runner passes (run.sh consumes those). Args are accepted and
-# ignored so the harness contract is satisfied.
+# setup.sh is pure provisioning. The eval-runner passes it no arguments;
+# run.sh consumes [API_KEY] EVAL_RUN_ID [--flags].
 # =============================================================================
 
 # Re-exec under stdbuf so every descendant inherits line-buffered stdio —

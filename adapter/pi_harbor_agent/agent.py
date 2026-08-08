@@ -7,12 +7,11 @@ import tempfile
 from pathlib import Path
 
 from harbor.agents.installed.base import BaseInstalledAgent, with_prompt_template
-from harbor.agents.installed.node_install import nvm_node_install_snippet
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
 from pi_harbor_agent.runtime import (
-    PI_PACKAGE,
+    build_install_command,
     build_models_config,
     build_run_command,
     build_settings,
@@ -69,14 +68,14 @@ class PiGridAgent(BaseInstalledAgent):
         await self.exec_as_root(environment, f"chmod {mode} {destination}")
 
     async def install(self, environment: BaseEnvironment) -> None:
-        await self.ensure_system_dependencies(environment, ("curl",))
+        await self.exec_as_root(
+            environment,
+            command="apt-get update && apt-get install -y curl git",
+            env={"DEBIAN_FRONTEND": "noninteractive"},
+        )
         await self.exec_as_agent(
             environment,
-            command=(
-                "set -euo pipefail; "
-                f"{nvm_node_install_snippet()} && "
-                f"npm install -g --ignore-scripts {PI_PACKAGE} && pi --version"
-            ),
+            command=build_install_command(),
         )
         await self.exec_as_root(
             environment,
@@ -151,4 +150,3 @@ class PiGridAgent(BaseInstalledAgent):
             "active_messages": summary.active_messages,
             "final_stop_reason": summary.final_stop_reason,
         }
-

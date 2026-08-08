@@ -12,6 +12,7 @@ sys.path.insert(0, str(ADAPTER_ROOT))
 
 from pi_harbor_agent.runtime import (  # noqa: E402
     PI_PACKAGE,
+    build_install_command,
     build_models_config,
     build_run_command,
     build_settings,
@@ -62,6 +63,20 @@ class PiRuntimeTest(unittest.TestCase):
             PI_PACKAGE,
             "@earendil-works/pi-coding-agent@latest",
         )
+
+    def test_install_command_bootstraps_node_without_harbor_helpers(self) -> None:
+        """Catches relying on Node helpers unavailable in Harbor 0.13.1."""
+        command = build_install_command()
+
+        self.assertIn("NVM_DIR=\"${NVM_DIR:-$HOME/.nvm}\"", command)
+        self.assertIn("nvm-sh/nvm/v0.40.2/install.sh", command)
+        self.assertIn("nvm install 22", command)
+        self.assertIn(
+            "npm install -g --ignore-scripts "
+            "@earendil-works/pi-coding-agent@latest",
+            command,
+        )
+        self.assertTrue(command.endswith("pi --version"))
 
 
 if __name__ == "__main__":

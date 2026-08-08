@@ -6,6 +6,24 @@ import shlex
 
 PROVIDER = "juspay"
 PI_PACKAGE = "@earendil-works/pi-coding-agent@latest"
+NVM_INSTALL_VERSION = "v0.40.2"
+
+
+def build_install_command() -> str:
+    """Build a Harbor-version-independent Pi installation command."""
+    return (
+        "set -euo pipefail; "
+        'NVM_DIR="${NVM_DIR:-$HOME/.nvm}"; export NVM_DIR; '
+        'if [ ! -s "$NVM_DIR/nvm.sh" ]; then '
+        'mkdir -p "$NVM_DIR"; '
+        f"curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/"
+        f"{NVM_INSTALL_VERSION}/install.sh | PROFILE=/dev/null bash; "
+        "fi; "
+        '. "$NVM_DIR/nvm.sh"; '
+        "nvm install 22; nvm use 22; "
+        f"npm install -g --ignore-scripts {shlex.quote(PI_PACKAGE)}; "
+        "pi --version"
+    )
 
 
 def build_models_config(
