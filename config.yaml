@@ -77,9 +77,10 @@ agents:
     description: "harbor built-in opencode; custom @ai-sdk/openai-compatible 'Grid' provider"
 
   pi:
-    kind: harbor-builtin
-    model_format: "openai/{MODEL}"
-    description: "harbor built-in pi (pi-mono) via standard openai provider"
+    kind: custom
+    import_path: pi_harbor_agent.agent:PiGridAgent
+    model_format: "juspay/{MODEL}"
+    description: "Custom Pi adapter with an explicit Grid provider and transcript validation"
 
   aider:
     kind: harbor-builtin

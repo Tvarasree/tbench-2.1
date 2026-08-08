@@ -435,6 +435,7 @@ declare -A _MODEL_FMT=(
   [xyne-cli]="juspay/{MODEL}"
   [claude-code]="{MODEL}"
   [opencode]="Grid/{MODEL}"
+  [pi]="juspay/{MODEL}"
 )
 if [[ "$MODEL" == */* ]]; then
   HARBOR_MODEL="$MODEL"
@@ -450,6 +451,12 @@ if [ "$AGENT" = "xyne-cli" ]; then
     --agent-env "XYNE_API_KEY=${XYNE_API_KEY}"
     --agent-env "XYNE_BASE_URL=${BASE_URL}"
   )
+elif [ "$AGENT" = "pi" ]; then
+  AGENT_FLAGS=(
+    --agent-import-path pi_harbor_agent.agent:PiGridAgent
+    --agent-env "PI_GRID_API_KEY=${XYNE_API_KEY}"
+    --agent-env "PI_GRID_BASE_URL=${BASE_URL}"
+  )
 else
   AGENT_FLAGS=(--agent "$AGENT")
   case "$AGENT" in
@@ -457,7 +464,7 @@ else
       MODEL_ID="${HARBOR_MODEL#*/}"
       OC_CFG="{\"provider\":{\"Grid\":{\"npm\":\"@ai-sdk/openai-compatible\",\"name\":\"Grid AI\",\"options\":{\"baseURL\":\"${BASE_URL}\",\"apiKey\":\"${XYNE_API_KEY}\"},\"models\":{\"${MODEL_ID}\":{\"id\":\"${MODEL_ID}\",\"name\":\"${MODEL_ID}\",\"reasoning\":true,\"tool_call\":true}}}}}"
       AGENT_FLAGS+=(--ak "opencode_config=${OC_CFG}") ;;
-    pi|aider)
+    aider)
       AGENT_FLAGS+=(--agent-env "OPENAI_BASE_URL=${BASE_URL}") ;;
   esac
 fi
@@ -527,6 +534,22 @@ else
   log_warn "    run dir does not exist: $RUN_DIR (harbor produced no job tree)"
 fi
 
+# Pi can exit zero after an API error, so Harbor's exit code alone cannot
+# establish that the model actually ran. Record health now, but defer the
+# process failure until every metrics/artifact file has been written.
+AGENT_HEALTH_RC=0
+AGENT_HEALTH_JSON=""
+if [ "$AGENT" = "pi" ]; then
+  log_step "Pi run health"
+  AGENT_HEALTH_JSON="${OUTPUT_DIR}/pi_health.json"
+  python3 "${SCRIPT_DIR}/analysis/pi_health.py" \
+    --run-dir "$RUN_DIR" \
+    --output "$AGENT_HEALTH_JSON" \
+    || AGENT_HEALTH_RC=$?
+  [ "$AGENT_HEALTH_RC" -eq 0 ] || \
+    log_warn "Pi run is systemically invalid (rc=$AGENT_HEALTH_RC); artifacts will still be finalized"
+fi
+
 # ---------------------------------------------------------------------------
 # Aggregate per-task (a task is SOLVED if reward>=1 in >=1 attempt) and emit
 # the standardized results JSON the eval-runner reads. Same metric shape as
@@ -561,6 +584,9 @@ python3 "${SCRIPT_DIR}/analysis/token_usage.py" \
 
 log_step "results"
 
+AGENT_HEALTH_FLAGS=()
+[ -n "$AGENT_HEALTH_JSON" ] && AGENT_HEALTH_FLAGS+=(--agent-health "$AGENT_HEALTH_JSON")
+
 python3 "${SCRIPT_DIR}/analysis/results.py" \
   --run-dir "$RUN_DIR" \
   --token-usage "$TOKEN_USAGE_JSON" \
@@ -570,7 +596,8 @@ python3 "${SCRIPT_DIR}/analysis/results.py" \
   --dataset "$DATASET" \
   --attempts "$ATTEMPTS" \
   --selected-tasks "$N_SEL" \
-  --harbor-exit-code "$HARBOR_RC"
+  --harbor-exit-code "$HARBOR_RC" \
+  "${AGENT_HEALTH_FLAGS[@]}"
 RESULTS_RC=$?
 
 # Clear the always-write trap only if the real results file now exists.
@@ -611,6 +638,10 @@ echo "Token usage (synced as repo/output/): ${OUTPUT_DIR}/token_usage.{json,csv,
 [ -f "${OUTPUT_DIR}/token_usage.html" ] && \
   echo "  HTML report: ${OUTPUT_DIR}/token_usage.html"
 
-# Exit 0 even if some tasks failed: the run COMPLETED and produced metrics.
-# Only a missing results file (handled above) is a real failure for the harness.
+# Reward-zero remains a valid completed benchmark. Only a systemic Pi harness
+# failure is nonzero, and it is emitted after results and reports are durable.
+if [ "$AGENT_HEALTH_RC" -ne 0 ]; then
+  log_err "Pi harness produced no valid model activity; failing run after artifact finalization"
+  exit "$AGENT_HEALTH_RC"
+fi
 exit 0

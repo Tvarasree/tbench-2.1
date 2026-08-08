@@ -221,6 +221,37 @@ class LoadAttemptsTest(unittest.TestCase):
             self.assertEqual(attempt["n_cache_read_tokens"], 300)
             self.assertEqual(attempt["n_cache_write_tokens"], 40)
 
+    def test_pi_error_transcript_overrides_harbor_zero_context_as_unmeasured(self) -> None:
+        """A synthetic zero context must not turn a failed API call into coverage."""
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = pathlib.Path(tmp)
+            make_trial(run_dir, "pi-task__1", reward=0.0, tokens=(0, 0, 0))
+            agent_dir = run_dir / "pi-task__1" / "agent"
+            agent_dir.mkdir()
+            (agent_dir / "pi.txt").write_text(
+                json.dumps(
+                    {
+                        "type": "message_end",
+                        "message": {
+                            "role": "assistant",
+                            "content": [],
+                            "stopReason": "error",
+                            "errorMessage": "401 Incorrect API key provided",
+                            "usage": {"input": 0, "output": 0},
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            attempt = tu.load_attempts(run_dir, agent="pi")[0]
+
+        self.assertFalse(attempt["measured"])
+        self.assertFalse(attempt["priceable"])
+        self.assertEqual(attempt["measurement_quality"], "unmeasured")
+        self.assertEqual(attempt["n_total_tokens"], 0)
+
     def test_goose_total_only_fallback_is_counted_but_not_priceable(self) -> None:
         """Harbor 0.13.1 stores Goose total_tokens in its input field."""
         with tempfile.TemporaryDirectory() as tmp:

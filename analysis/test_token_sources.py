@@ -58,6 +58,71 @@ class TokenSourcesTest(unittest.TestCase):
             self.assertEqual(usage.n_cache_write_tokens, 40)
             self.assertEqual(usage.n_output_tokens, 20)
 
+    def test_pi_error_only_zero_usage_is_unmeasured(self) -> None:
+        """Catches reporting an authentication failure as full zero-token coverage."""
+        with tempfile.TemporaryDirectory() as tmp:
+            trial = self._trial(tmp)
+            self._jsonl(trial / "agent" / "pi.txt", [{
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [],
+                    "stopReason": "error",
+                    "errorMessage": "401 Incorrect API key provided",
+                    "usage": {
+                        "input": 0,
+                        "output": 0,
+                        "cacheRead": 0,
+                        "cacheWrite": 0,
+                        "cost": {"total": 0},
+                    },
+                },
+            }])
+
+            self.assertIsNone(parse_agent_usage(trial, "pi"))
+
+    def test_pi_keeps_real_usage_before_a_later_error(self) -> None:
+        """Catches discarding billable turns when only the final request failed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            trial = self._trial(tmp)
+            self._jsonl(trial / "agent" / "pi.txt", [
+                {
+                    "type": "message_end",
+                    "message": {
+                        "role": "assistant",
+                        "stopReason": "toolUse",
+                        "usage": {
+                            "input": 100,
+                            "output": 20,
+                            "cacheRead": 30,
+                            "cacheWrite": 0,
+                            "cost": {"total": 0.1},
+                        },
+                    },
+                },
+                {
+                    "type": "message_end",
+                    "message": {
+                        "role": "assistant",
+                        "content": [],
+                        "stopReason": "error",
+                        "usage": {
+                            "input": 0,
+                            "output": 0,
+                            "cacheRead": 0,
+                            "cacheWrite": 0,
+                            "cost": {"total": 0},
+                        },
+                    },
+                },
+            ])
+
+            usage = parse_agent_usage(trial, "pi")
+            self.assertIsNotNone(usage)
+            self.assertEqual(usage.n_input_tokens, 130)
+            self.assertEqual(usage.n_output_tokens, 20)
+
+
     def test_aider_uses_last_cumulative_token_line(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             trial = self._trial(tmp)

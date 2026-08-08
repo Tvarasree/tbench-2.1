@@ -95,6 +95,27 @@ def _token_usage_headline(path: pathlib.Path) -> dict[str, Any]:
         return {"status": "unreadable", "reason": repr(exc)}
 
 
+def _agent_health(path: pathlib.Path | None) -> dict[str, Any]:
+    if path is None:
+        return {"status": "not-applicable"}
+    if not path.is_file():
+        return {"status": "unavailable", "reason": "health report not written"}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001 - result generation stays defensive
+        return {"status": "unreadable", "reason": repr(exc)}
+    if not isinstance(value, dict):
+        return {
+            "status": "unreadable",
+            "reason": "health report is not a JSON object",
+        }
+    failures = value.pop("failures", None)
+    if isinstance(failures, list):
+        value["failure_examples"] = failures[:10]
+        value["failure_details_artifact"] = "pi_health.json"
+    return value
+
+
 def build_results(
     *,
     run_dir: pathlib.Path,
@@ -105,6 +126,7 @@ def build_results(
     attempts: int,
     selected_tasks: int,
     harbor_exit_code: int,
+    agent_health_path: pathlib.Path | None = None,
 ) -> dict[str, Any]:
     tasks = _load_tasks(run_dir)
     solved = sorted(name for name, record in tasks.items() if record["passed"] >= 1)
@@ -163,6 +185,7 @@ def build_results(
                 "dataset": dataset,
                 "attempts_per_task": attempts,
                 "harbor_exit_code": harbor_exit_code,
+                "agent_health": _agent_health(agent_health_path),
                 "token_usage": _token_usage_headline(token_usage_path),
                 "solved_task_trial_success_pct": repeatability,
                 "solved_task_trial_success": {
@@ -218,6 +241,7 @@ def main() -> int:
     parser.add_argument("--attempts", required=True, type=int)
     parser.add_argument("--selected-tasks", required=True, type=int)
     parser.add_argument("--harbor-exit-code", required=True, type=int)
+    parser.add_argument("--agent-health", type=pathlib.Path)
     args = parser.parse_args()
 
     result = build_results(
@@ -229,6 +253,7 @@ def main() -> int:
         attempts=args.attempts,
         selected_tasks=args.selected_tasks,
         harbor_exit_code=args.harbor_exit_code,
+        agent_health_path=args.agent_health,
     )
     write_results(args.output, result)
     metrics = result["metrics"]

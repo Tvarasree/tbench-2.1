@@ -244,7 +244,7 @@ setup_uv() {
 }
 
 # ---------------------------------------------------------------------------
-# 6. harbor + xyne adapter (single isolated uv tool env).
+# 6. harbor + custom agent adapters (single isolated uv tool env).
 # ---------------------------------------------------------------------------
 # Pinned: the DooD patch below targets this version's internals (the
 # capabilities API it touches is stable, but pin anyway so a surprise harbor
@@ -252,22 +252,22 @@ setup_uv() {
 HARBOR_PIN="harbor==0.13.1"
 
 setup_harbor() {
-  header "harbor + xyne adapter"
+  header "harbor + custom agent adapters"
   export PATH="$HOME/.local/bin:$PATH"
 
   ADAPTER_DIR="${SCRIPT_DIR}/adapter"
   if [ -d "$ADAPTER_DIR" ]; then
-    info "Installing ${HARBOR_PIN} with the xyne adapter editable in its env..."
+    info "Installing ${HARBOR_PIN} with the agent adapters editable in its env..."
     if uv tool install "$HARBOR_PIN" --with-editable "$ADAPTER_DIR" --reinstall; then
-      ok "harbor installed with xyne_harbor_agent available"
+      ok "harbor installed with custom agents available"
     else
-      warn "harbor+adapter install failed; retrying harbor alone then injecting adapter"
+      warn "harbor+adapter install failed; retrying harbor alone then injecting adapters"
       uv tool install "$HARBOR_PIN" --reinstall || die "harbor install failed"
       uv tool run --from harbor python -m pip install -e "$ADAPTER_DIR" \
-        || warn "Could not inject adapter — xyne-cli agent may be unavailable"
+        || warn "Could not inject adapters — custom agents may be unavailable"
     fi
   else
-    warn "adapter/ not found — installing harbor without xyne-cli support"
+    warn "adapter/ not found — installing harbor without custom-agent support"
     uv tool install "$HARBOR_PIN" --reinstall || die "harbor install failed"
   fi
   command_exists harbor && ok "harbor: $(harbor --version 2>/dev/null || echo installed)" \
@@ -599,6 +599,7 @@ verify() {
   check "uv"                    "command_exists uv"
   check "harbor"                "command_exists harbor"
   check "xyne adapter import"   "uv tool run --from harbor python -c 'import xyne_harbor_agent.agent'"
+  check "pi adapter import"     "uv tool run --from harbor python -c 'import pi_harbor_agent.agent'"
   check "dataset cache"         "[ -n \"\$(find \$HOME/.cache/harbor -name task.toml 2>/dev/null | head -1)\" ]"
   check "xyne linux binary"     "[ -s \"${SCRIPT_DIR}/binaries/xyne-linux-x64\" ] || [ -s \"${SCRIPT_DIR}/binaries/xyne-linux-arm64\" ]"
   check "gcloud-env.sh"         "[ -f /var/lib/docker/gcloud-env.sh ] || [ \"\$(uname -s)\" != Linux ]"

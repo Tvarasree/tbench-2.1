@@ -91,8 +91,14 @@ def _parse_pi(agent_dir: Path) -> Usage | None:
         current_input = _number(usage.get("input"))
         current_read = _number(usage.get("cacheRead"))
         current_write = _number(usage.get("cacheWrite"))
+        current_output = _number(usage.get("output"))
+        if (
+            message.get("stopReason") in {"error", "aborted"}
+            and current_input + current_read + current_write + current_output == 0
+        ):
+            continue
         input_tokens += current_input + current_read + current_write
-        output_tokens += _number(usage.get("output"))
+        output_tokens += current_output
         cache_read += current_read
         cache_write += current_write
         usage_cost = usage.get("cost")

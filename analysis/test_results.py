@@ -231,6 +231,39 @@ class BuildResultsTest(unittest.TestCase):
         self.assertEqual(headline["measured_successful_trials"], 1)
         self.assertEqual(headline["avg_tokens_per_successful_trial"], 100.0)
 
+    def test_agent_health_report_is_embedded_in_additional_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            make_reward(root / "run", "alpha__1", 0)
+            health_path = root / "pi_health.json"
+            health_path.write_text(
+                json.dumps(
+                    {
+                        "status": "invalid",
+                        "active_attempts": 0,
+                        "failures": [{"trial": str(index)} for index in range(20)],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            additional = results.build_results(
+                run_dir=root / "run",
+                token_usage_path=root / "missing.json",
+                agent="pi",
+                model="kimi-k3",
+                dataset="terminal-bench/terminal-bench-2-1",
+                attempts=1,
+                selected_tasks=1,
+                harbor_exit_code=0,
+                agent_health_path=health_path,
+            )["metrics"]["additional"]
+
+        self.assertEqual(additional["agent_health"]["status"], "invalid")
+        self.assertEqual(additional["agent_health"]["active_attempts"], 0)
+        self.assertNotIn("failures", additional["agent_health"])
+        self.assertEqual(len(additional["agent_health"]["failure_examples"]), 10)
+
 
 if __name__ == "__main__":
     unittest.main()

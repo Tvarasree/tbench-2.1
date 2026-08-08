@@ -249,6 +249,17 @@ def load_attempts(run_dir: pathlib.Path, agent: str = "") -> list[dict]:
                 measurement_quality = raw_usage.quality
                 priceable = raw_usage.quality == "full"
                 total_override = None
+            elif selected_agent == "pi" and (trial_dir / "agent" / "pi.txt").is_file():
+                # Harbor may serialize a synthetic all-zero AgentContext even
+                # when Pi only emitted an API/CLI error. A present transcript
+                # with no parseable usage is unmeasured, not measured zero.
+                n_input = n_cache = n_cache_read = n_cache_write = n_output = 0
+                cost = None
+                measured = False
+                usage_source = "pi-transcript-unmeasured"
+                measurement_quality = "unmeasured"
+                priceable = False
+                total_override = None
 
         attempts.append(
             {

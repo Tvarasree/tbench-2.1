@@ -30,6 +30,15 @@ class InputParamsContractTest(unittest.TestCase):
         self.assertNotIn('TOKEN_PRICE_FLAGS+=(--price-cached', source)
         self.assertNotIn('TOKEN_PRICE_FLAGS+=(--price-cache-write', source)
 
+    def test_pi_uses_the_custom_grid_adapter(self) -> None:
+        run_source = (ROOT / "run.sh").read_text()
+        config_source = (ROOT / "config.yaml").read_text()
+
+        self.assertIn("pi_harbor_agent.agent:PiGridAgent", run_source)
+        self.assertIn('PI_GRID_BASE_URL=${BASE_URL}', run_source)
+        self.assertNotIn("pi|aider)", run_source)
+        self.assertIn('model_format: "juspay/{MODEL}"', config_source)
+
 
 if __name__ == "__main__":
     unittest.main()
