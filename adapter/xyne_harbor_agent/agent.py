@@ -25,7 +25,6 @@ DEFAULT_BINARY_DIR = (
 DEFAULT_BASE_URL = "https://grid.ai.juspay.net/v1"
 DEFAULT_PROVIDER = "juspay"
 DEFAULT_MODEL = "private-large"
-ALLOWED_TOOLS = "read,write,edit,multiedit,grep,glob,ls,bash,todo-write"
 
 
 class XyneCliAgent(BaseInstalledAgent):
@@ -195,9 +194,12 @@ class XyneCliAgent(BaseInstalledAgent):
             # can ever be solved. See handlePromptCommand in xyne-cli
             # src/core/services/cli-parser.ts. Position is free: the flag is
             # filtered out of the prompt text by exact match, and `escaped` is
-            # a single shell-quoted argv element.
+            # a single shell-quoted argv element. Do not pass --tools: when the
+            # option is absent, xyne activates every tool registered in the
+            # headless session; supplying it creates a strict allow-list that
+            # can become stale as xyne's tool registry changes.
             command=(
-                f"xyne prompt {escaped} --yolo --tools={ALLOWED_TOOLS} "
+                f"xyne prompt {escaped} --yolo "
                 f"2>&1 | tee /logs/agent/xyne.log"
             ),
         )
