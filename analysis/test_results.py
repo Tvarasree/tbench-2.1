@@ -264,6 +264,42 @@ class BuildResultsTest(unittest.TestCase):
         self.assertNotIn("failures", additional["agent_health"])
         self.assertEqual(len(additional["agent_health"]["failure_examples"]), 10)
 
+    def test_recovery_report_is_embedded_without_changing_scores(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            make_reward(root / "run", "alpha__1", 1)
+            recovery_path = root / "harbor_recovery.json"
+            recovery_path.write_text(
+                json.dumps(
+                    {
+                        "status": "complete",
+                        "planned_trials": 1,
+                        "completed_trials": 1,
+                        "initial_harbor_exit_code": 1,
+                        "invocation_exit_codes": [1, 0],
+                        "automatic_resume_count": 1,
+                        "recovered_trials": 1,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            metrics = results.build_results(
+                run_dir=root / "run",
+                token_usage_path=root / "missing.json",
+                agent="xyne-cli",
+                model="kimi-k3",
+                dataset="terminal-bench/terminal-bench-2-1",
+                attempts=1,
+                selected_tasks=1,
+                harbor_exit_code=1,
+                recovery_path=recovery_path,
+            )["metrics"]
+
+        self.assertEqual(metrics["main"], {"name": "Solved", "value": 1})
+        self.assertEqual(metrics["additional"]["status"], "complete")
+        self.assertEqual(metrics["additional"]["harbor_recovery"]["recovered_trials"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

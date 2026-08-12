@@ -273,6 +273,7 @@ setup_harbor() {
     || die "harbor not on PATH after install"
 
   patch_harbor_dood
+  patch_harbor_resilience
 }
 
 # ---------------------------------------------------------------------------
@@ -375,6 +376,47 @@ PYEOF
     ok "verified: without TB_HARBOR_UNMOUNTED harbor behavior is unchanged (mounted mode)"
   else
     warn "verification FAILED — patch active even without TB_HARBOR_UNMOUNTED (native runs affected)"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# 6c. Local-first package resolution, registry retry, and trial isolation.
+# ---------------------------------------------------------------------------
+patch_harbor_resilience() {
+  header "harbor task-resolution resilience patch"
+
+  local harbor_bin venv_dir site_pkgs patched_path
+  harbor_bin="$(readlink -f "$(command -v harbor)" 2>/dev/null)" \
+    || die "Cannot resolve harbor binary path for resilience patch"
+  venv_dir="${harbor_bin%/bin/harbor}"
+  site_pkgs="$("${venv_dir}/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])' 2>/dev/null)"
+  [ -n "$site_pkgs" ] && [ -d "$site_pkgs" ] \
+    || die "Cannot locate harbor venv site-packages for resilience patch"
+
+  patched_path="$("${venv_dir}/bin/python" -c \
+    'from tb_harbor_compat.install import patch_installed_harbor; print(patch_installed_harbor())' 2>&1)" \
+    || die "Harbor 0.13.1 failure-isolation patch rejected: ${patched_path}"
+  ok "failure-isolation source patch verified: ${patched_path}"
+
+  echo 'import tb_harbor_compat.runtime as _tbhr; _tbhr.activate()' \
+    > "${site_pkgs}/tb_harbor_resilience.pth" \
+    || die "Could not install tb_harbor_resilience.pth"
+
+  if "${venv_dir}/bin/python" - <<'PYEOF'
+from harbor.registry.client.package import PackageDatasetClient
+from harbor.tasks.client import TaskClient
+from tb_harbor_compat.install import _MARKER
+import harbor.job
+import pathlib
+
+assert getattr(TaskClient._resolve_package_version, "_tb_resilient", False)
+assert getattr(PackageDatasetClient._get_dataset_metadata, "_tb_resilient", False)
+assert _MARKER in pathlib.Path(harbor.job.__file__).read_text(encoding="utf-8")
+PYEOF
+  then
+    ok "verified: local-first cache, registry retry, and failure isolation active"
+  else
+    die "Harbor resilience verification failed; refusing an unprotected benchmark run"
   fi
 }
 

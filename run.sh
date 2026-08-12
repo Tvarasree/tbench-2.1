@@ -322,6 +322,24 @@ select_tasks() {
 mapfile -t SELECTED < <(select_tasks)
 N_SEL=${#SELECTED[@]}
 [ "$N_SEL" -ge 1 ] || { log_err "selection produced 0 tasks"; exit 1; }
+EXPECTED_TRIALS=$((N_SEL * ATTEMPTS))
+
+# Resolve every selected package to one immutable, complete local digest before
+# pulling images or spending model compute. Harbor's runtime patch consumes the
+# same ~/.cache path directly for all attempts.
+TASKS_FILE="${OUTPUT_DIR}/selected_tasks.txt"
+TASK_CACHE_MANIFEST="${OUTPUT_DIR}/task_cache_manifest.json"
+printf '%s\n' "${SELECTED[@]}" > "$TASKS_FILE"
+log_step "task cache preflight"
+if ! python3 "${SCRIPT_DIR}/scripts/task_cache.py" preflight \
+    --cache-root "$HOME/.cache/harbor/tasks" \
+    --org "$DATASET_ORG" \
+    --tasks-file "$TASKS_FILE" \
+    --manifest "$TASK_CACHE_MANIFEST"; then
+  log_err "Selected task cache is incomplete or ambiguous; refusing to start agents"
+  exit 1
+fi
+df -h "$HOME/.cache/harbor" 2>/dev/null | sed 's/^/    /' || true
 
 log_step "selection"
 echo "    eval_run_id: $EVAL_RUN_ID"
@@ -347,15 +365,12 @@ echo "    output:      $RESULTS_FILE"
 # ---------------------------------------------------------------------------
 if [ "$USE_GAR" = 1 ]; then
   log_step "GAR image pre-pull"
-  TASKS_FILE="$(mktemp)"
-  printf '%s\n' "${SELECTED[@]}" > "$TASKS_FILE"
   if python3 "${SCRIPT_DIR}/scripts/pull_tb_images.py" \
        --tasks-file "$TASKS_FILE" --concurrency "$CONCURRENCY"; then
     log_ok "GAR pre-pull complete"
   else
     log_warn "GAR pre-pull had failures — harbor will try Docker Hub for any missing image"
   fi
-  rm -f "$TASKS_FILE"
 fi
 
 # ---------------------------------------------------------------------------
@@ -501,10 +516,10 @@ TIMEOUT_FLAGS=()
 # the time result.json lands). Volume stays readable at any scale: 2 lines per
 # trial + ~12 summary lines/hour, never a refresh flood.
 # ---------------------------------------------------------------------------
-EXPECTED_TRIALS=$((N_SEL * ATTEMPTS))
-
 # ---------------------------------------------------------------------------
-# harbor run (failure is captured, NOT fatal — we still write results).
+# harbor run + bounded same-job recovery. Completed trials are retained;
+# Harbor's resume command removes CancelledError results and reruns only
+# cancelled, missing, or incomplete trial directories.
 # ---------------------------------------------------------------------------
 log_step "harbor run (job: $JOB_ID)"
 heartbeat & HB_PID=$!
@@ -524,7 +539,66 @@ harbor run \
   --yes || HARBOR_RC=$?
 stop_heartbeat
 [ "$HARBOR_RC" -eq 0 ] && log_ok "harbor run finished" \
-  || log_warn "harbor run exited $HARBOR_RC — aggregating whatever graded"
+  || log_warn "harbor run exited $HARBOR_RC — checking bounded recovery"
+
+INITIAL_JOB_STATE="${OUTPUT_DIR}/harbor_initial_state.json"
+python3 "${SCRIPT_DIR}/analysis/job_recovery.py" inspect \
+  --job-dir "$RUN_DIR" --planned "$EXPECTED_TRIALS" > "$INITIAL_JOB_STATE" || true
+
+HARBOR_EXIT_CODES=("$HARBOR_RC")
+MAX_AUTO_RESUMES=2
+for ((resume_index=1; resume_index<=MAX_AUTO_RESUMES; resume_index++)); do
+  CURRENT_STATE="$(python3 "${SCRIPT_DIR}/analysis/job_recovery.py" inspect \
+    --job-dir "$RUN_DIR" --planned "$EXPECTED_TRIALS" 2>/dev/null || echo '{}')"
+  CURRENT_COMPLETE="$(python3 -c 'import json,sys; print(1 if json.load(sys.stdin).get("complete") else 0)' \
+    <<< "$CURRENT_STATE" 2>/dev/null || echo 0)"
+  LAST_RC="${HARBOR_EXIT_CODES[$((${#HARBOR_EXIT_CODES[@]} - 1))]}"
+  if [ "$CURRENT_COMPLETE" = 1 ] && [ "$LAST_RC" -eq 0 ]; then
+    break
+  fi
+  if [ ! -f "${RUN_DIR}/config.json" ]; then
+    log_warn "Cannot resume: Harbor job config is missing at ${RUN_DIR}/config.json"
+    break
+  fi
+
+  BEFORE_VALID="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("valid_completed", 0))' \
+    <<< "$CURRENT_STATE" 2>/dev/null || echo 0)"
+  log_step "harbor automatic resume ${resume_index}/${MAX_AUTO_RESUMES}"
+  heartbeat & HB_PID=$!
+  RESUME_RC=0
+  harbor jobs resume --job-path "$RUN_DIR" || RESUME_RC=$?
+  stop_heartbeat
+  HARBOR_EXIT_CODES+=("$RESUME_RC")
+
+  AFTER_STATE="$(python3 "${SCRIPT_DIR}/analysis/job_recovery.py" inspect \
+    --job-dir "$RUN_DIR" --planned "$EXPECTED_TRIALS" 2>/dev/null || echo '{}')"
+  AFTER_VALID="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("valid_completed", 0))' \
+    <<< "$AFTER_STATE" 2>/dev/null || echo 0)"
+  AFTER_COMPLETE="$(python3 -c 'import json,sys; print(1 if json.load(sys.stdin).get("complete") else 0)' \
+    <<< "$AFTER_STATE" 2>/dev/null || echo 0)"
+  log_info "resume ${resume_index}: rc=${RESUME_RC}, valid completed ${BEFORE_VALID}->${AFTER_VALID}/${EXPECTED_TRIALS}"
+  if [ "$AFTER_COMPLETE" = 1 ] && [ "$RESUME_RC" -eq 0 ]; then
+    log_ok "Harbor recovery completed the planned job"
+    break
+  fi
+  if [ "$AFTER_VALID" -le "$BEFORE_VALID" ]; then
+    log_warn "Harbor recovery made no progress; stopping automatic resumes"
+    break
+  fi
+done
+
+EXIT_CODES_CSV="$(IFS=,; echo "${HARBOR_EXIT_CODES[*]}")"
+RECOVERY_JSON="${OUTPUT_DIR}/harbor_recovery.json"
+FINAL_RUN_RC=0
+python3 "${SCRIPT_DIR}/analysis/job_recovery.py" report \
+  --job-dir "$RUN_DIR" \
+  --planned "$EXPECTED_TRIALS" \
+  --initial-state "$INITIAL_JOB_STATE" \
+  --exit-codes "$EXIT_CODES_CSV" \
+  --output "$RECOVERY_JSON" || FINAL_RUN_RC=$?
+[ "$FINAL_RUN_RC" -eq 0 ] \
+  && log_ok "completion gate passed: ${EXPECTED_TRIALS}/${EXPECTED_TRIALS} trials" \
+  || log_warn "completion gate failed; partial artifacts will be finalized before exit"
 
 # ---------------------------------------------------------------------------
 # Per-trial artifact visibility. Distinguishes the two failure modes in the
@@ -616,6 +690,7 @@ python3 "${SCRIPT_DIR}/analysis/results.py" \
   --attempts "$ATTEMPTS" \
   --selected-tasks "$N_SEL" \
   --harbor-exit-code "$HARBOR_RC" \
+  --recovery "$RECOVERY_JSON" \
   "${AGENT_HEALTH_FLAGS[@]}"
 RESULTS_RC=$?
 
@@ -663,4 +738,7 @@ if [ "$AGENT_HEALTH_RC" -ne 0 ]; then
   log_err "Pi harness produced no valid model activity; failing run after artifact finalization"
   exit "$AGENT_HEALTH_RC"
 fi
-exit 0
+if [ "$FINAL_RUN_RC" -ne 0 ]; then
+  log_err "Harbor job remained incomplete after recovery; failing after artifact finalization"
+fi
+exit "$FINAL_RUN_RC"

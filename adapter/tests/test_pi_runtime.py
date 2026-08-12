@@ -57,6 +57,19 @@ class PiRuntimeTest(unittest.TestCase):
         self.assertIn("set -o pipefail", command)
         self.assertIn("tee /logs/agent/pi.txt", command)
 
+    def test_all_builtin_tools_are_enabled_without_extensions(self) -> None:
+        command = build_run_command(
+            model_id="kimi-k3",
+            prompt_path="/tmp/pi-grid-instruction.txt",
+            output_path="/logs/agent/pi.txt",
+        )
+
+        self.assertIn("--no-extensions", command)
+        self.assertIn(
+            "--tools read,bash,edit,write,grep,find,ls",
+            command,
+        )
+
     def test_package_tracks_latest_current_namespace_release(self) -> None:
         """Catches pinning Pi or falling back to the deprecated package scope."""
         self.assertEqual(

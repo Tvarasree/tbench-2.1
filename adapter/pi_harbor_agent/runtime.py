@@ -51,6 +51,7 @@ def build_run_command(
     return (
         "set -o pipefail; . ~/.nvm/nvm.sh; "
         "pi --print --mode json --no-session "
+        "--no-extensions --tools read,bash,edit,write,grep,find,ls "
         f"--provider {shlex.quote(PROVIDER)} --model {shlex.quote(model_id)} "
         f"< {shlex.quote(prompt_path)} 2>&1 | "
         f"stdbuf -oL tee {shlex.quote(output_path)}"

@@ -30,26 +30,15 @@ warn()  { echo -e "${YELLOW}[warn]  $*${NC}"; }
 err()   { echo -e "${RED}[error] $*${NC}" >&2; }
 
 yaml_get() {
-  python3 - "$CONFIG" "$1" <<'PY' 2>/dev/null
-import sys
-try:
-    import yaml
-except Exception:
-    sys.exit(3)
-cfg = yaml.safe_load(open(sys.argv[1], encoding="utf-8")) or {}
-cur = cfg
-for part in sys.argv[2].split("."):
-    if not isinstance(cur, dict) or part not in cur:
-        sys.exit(4)
-    cur = cur[part]
-print(cur if cur is not None else "")
-PY
+  python3 "${SCRIPT_DIR}/task_cache.py" config-value \
+    --config "$CONFIG" --key "$1" 2>/dev/null
 }
 
 [ -f "$CONFIG" ] || { err "config.yaml not found at $CONFIG"; exit 2; }
 
 DATASET_NAME="$(yaml_get dataset.name || echo 'terminal-bench/terminal-bench-2-1')"
 CACHE_SUBDIR="$(yaml_get dataset.harbor_cache_subdir || echo tasks)"
+EXPECTED_TASKS="$(yaml_get dataset.task_count || echo 89)"
 GCS_URI="$(yaml_get dataset.tarball.gcs_uri || true)"
 SHA_URI="$(yaml_get dataset.tarball.sha256_gcs_uri || true)"
 [ -n "${SHA_URI:-}" ] || SHA_URI="${GCS_URI}.sha256"
@@ -60,12 +49,13 @@ CACHE_DIR="${HARBOR_ROOT}/${CACHE_SUBDIR}"
 # ---------------------------------------------------------------------------
 # 1. Idempotency — already populated?
 # ---------------------------------------------------------------------------
-existing=$(find "$CACHE_DIR" -name task.toml 2>/dev/null | head -5 | wc -l | tr -d ' ')
-if [ "${existing:-0}" -ge 1 ]; then
-  n=$(find "$CACHE_DIR" -name task.toml 2>/dev/null | wc -l | tr -d ' ')
+existing=$(find "$CACHE_DIR" -name task.toml 2>/dev/null | wc -l | tr -d ' ')
+if [ "${existing:-0}" -ge "$EXPECTED_TASKS" ]; then
+  n="$existing"
   ok "Harbor task cache already populated ($n task.toml under $CACHE_DIR) — skipping fetch"
   exit 0
 fi
+[ "${existing:-0}" -eq 0 ] || warn "Harbor task cache is partial ($existing/$EXPECTED_TASKS); restoring dataset"
 
 gcs_cp() {
   if command -v gsutil >/dev/null 2>&1; then gsutil -q cp "$1" "$2"
@@ -144,8 +134,8 @@ if ! tar "${DECOMP[@]}" -xf "$LOCAL_TAR" -C "$HARBOR_ROOT"; then
 fi
 
 n=$(find "$CACHE_DIR" -name task.toml 2>/dev/null | wc -l | tr -d ' ')
-if [ "${n:-0}" -lt 1 ]; then
-  err "Extraction produced no task.toml under $CACHE_DIR"
+if [ "${n:-0}" -lt "$EXPECTED_TASKS" ]; then
+  err "Extraction produced an incomplete cache ($n/$EXPECTED_TASKS task.toml under $CACHE_DIR)"
   harbor_download_fallback; exit $?
 fi
 
