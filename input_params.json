@@ -25,6 +25,7 @@
       "name": "coding_agent",
       "options": [
         "xyne-cli",
+        "xyne-cli-native",
         "claude-code",
         "opencode",
         "pi",

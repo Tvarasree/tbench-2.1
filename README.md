@@ -19,6 +19,7 @@ as `swe-auto-eval`**, so it drops into the existing eval dashboard pipeline.
 | Dataset | `terminal-bench/terminal-bench-2-1` (89 tasks) cached under `~/.cache/harbor` |
 | Task images | Each `task.toml` declares `[environment].docker_image`. We mirror all 89 into **Google Artifact Registry** once, and pull from GAR every run (no Docker Hub at run time). |
 | Custom agent | `xyne_harbor_agent.agent:XyneCliAgent` — uploads the prebuilt `xyne-linux-{arch}` binary into the task container and runs `xyne prompt --yolo`. `--yolo` is mandatory: headless `xyne prompt` has no interactive approver, so without it every mutating tool call stalls at the permission gate and no task can be solved. |
+| Native-engine agent | `xyne_native_harbor_agent.agent:XyneNativeCliAgent` (`--agent xyne-cli-native`) — the same CLI on its **native plugin-kernel engine**, via `XYNE_NATIVE_HARNESS=1`. See [Native harness](#native-harness-xyne-cli-native). |
 | Other agents | harbor built-ins: `claude-code`, `opencode`, `pi`, `aider`, `goose`, `codex` |
 | Models | grid.ai (juspay), default `private-large`; self-hosted/open-weights for the PoC sweep |
 | Config | `config.yaml` — single source of truth (models, agents, GAR, GCS, defaults) |
@@ -173,7 +174,8 @@ All four are **USD per 1,000,000 tokens** and optional:
 
 The report prefers each agent's native artifact, preserving fields Harbor
 0.13.1 drops, then falls back to `result.json` (`AgentContext`). It supports
-`xyne-cli`, `claude-code`, `opencode`, `pi`, `aider`, `goose`, and `codex`.
+`xyne-cli`, `xyne-cli-native`, `claude-code`, `opencode`, `pi`, `aider`,
+`goose`, and `codex`.
 Every row records its source and measurement quality. Outcomes come from
 `verifier/reward.txt`; one row is one **trial** = one attempt.
 
@@ -198,6 +200,13 @@ input because its input/output split is unknown.
 > adapter sums per-message `usage` — the same way xyne computes its own totals.
 > Subagent turns are only counted if pi persisted them into that session file.
 > Reconcile against a finished run before trusting absolute xyne-cli numbers.
+>
+> `xyne-cli-native` is measured differently and does **not** share that limit:
+> the native engine writes an append-only `llm_usage` ledger row per model step
+> (exact provider counters, including tool-loop steps), which
+> `xyne_native_harbor_agent.session_usage` sums directly. The embedded reader
+> cannot read it — different record kind, different field names — which is why
+> the two adapters do not share a parser.
 
 Reporting is non-fatal and standalone-runnable over a finished job:
 
@@ -218,10 +227,13 @@ terminal-bench/
 ├── run.sh                      # eval-runner-contract entrypoint + results
 ├── input_params.json           # reference copy of the dashboard's run form
 ├── requirements.txt            # helper-script deps (PyYAML)
-├── adapter/                    # the xyne-cli harbor agent
-│   └── xyne_harbor_agent/
-│       ├── agent.py            # install + `xyne prompt --yolo` + token capture
-│       └── session_usage.py    # session-JSONL parser (harbor-free, unit-tested)
+├── adapter/                    # the xyne-cli harbor agents
+│   ├── xyne_harbor_agent/      # embedded-Pi engine (default)
+│   │   ├── agent.py            # install + `xyne prompt --yolo` + token capture
+│   │   └── session_usage.py    # session-JSONL parser (harbor-free, unit-tested)
+│   └── xyne_native_harbor_agent/   # native plugin-kernel engine
+│       ├── agent.py            # same + XYNE_NATIVE_HARNESS=1, engine probe/verdict
+│       └── session_usage.py    # llm_usage ledger parser + engine classifier
 ├── analysis/
 │   ├── token_sources.py        # native parsers for all seven offered agents
 │   ├── token_usage.py          # normalization, pricing, aggregation, emitters
@@ -238,8 +250,87 @@ terminal-bench/
 ├── binaries -> ../xyne-cli/binaries   # local dev symlink; setup.sh replaces it
 │                                      # with a real dir + npm-fetched binaries
 │                                      # on a fresh VM
+├── binaries-native/            # setup.sh builds this from feat/native-harness
+│                               # (gitignored; never fetched from npm)
 └── runs/                       # harbor job outputs
 ```
+
+## Native harness (`xyne-cli-native`)
+
+`xyne-cli` ships two engines. The default is the embedded Pi runtime; the
+**native plugin-kernel** engine is opt-in at runtime via `XYNE_NATIVE_HARNESS=1`.
+`session-factory.ts` is the single branch point, and headless `xyne prompt` goes
+through the same factory as the TUI, so the env var is the entire switch — there
+is no separate binary mode or entrypoint.
+
+```bash
+./run.sh my-run-id --task regex-log --agent xyne-cli-native --model private-large
+```
+
+**Where the binary comes from.** The native engine lives on the unmerged
+`feat/native-harness` branch and is **not on npm** — registry `latest` tracks
+`master`, which has no kernel code. Building it on the VM was tried and
+rejected: **that branch does not build from a clean checkout.** Three defects,
+each reproduced (xyne-cli @ `d7d59564`):
+
+1. `build:webpack-bundle` fails — webpack cannot resolve `@xyne/protocol`.
+   `tsconfig.json` maps it via `paths` (tsc only); `webpack.config.cjs` has no
+   matching alias and the root `package.json` does not declare it, so `bun install`
+   never links it. Fix: `ln -s ../../packages/protocol node_modules/@xyne/protocol`.
+2. The resulting binary **crashes at startup**, on Linux and macOS alike:
+   `graceful-fs` (via `proper-lockfile`) monkey-patches the `fs` module object at
+   import time, and Bun's compiled-binary `fs` namespace is non-extensible, so
+   `Object.defineProperty` throws before `main()`. Fix: route `graceful-fs` to the
+   builtin in `webpack.config.cjs`'s function-based externals —
+   `if (request === 'graceful-fs') return callback(null, 'import node:fs');`
+3. `npm install` fails with `EOVERRIDE` — `overrides["@babel/core"]` is `^7.29.7`
+   while `devDependencies` pins exact `7.29.7` (bun's `exact = true` in
+   `bunfig.toml` rewrote it). Master has caret in both, so this is
+   branch-introduced. No CI builds a binary, which is why it went unnoticed.
+
+So the binary is **built by hand and committed**, zstd-compressed to 33 MB (under
+GitHub's 50 MB warning threshold; the raw 112 MB would exceed the 100 MB hard
+limit). `setup.sh` only decompresses it — `zstd` is already a verified dependency.
+
+To rebuild after the branch moves (**it will not build without the two patches
+above**):
+
+```bash
+bun install --frozen-lockfile
+ln -s ../../packages/protocol node_modules/@xyne/protocol      # defect 1
+# apply the graceful-fs external in webpack.config.cjs          # defect 2
+bun run build:protocol && bun run build:compile \
+  && bun run build:webpack-bundle && bun run build:binary:prepare \
+  && bun run build:binary:linux-x64
+zstd -19 -T0 binaries/xyne-linux-x64 -o <repo>/binaries-native/xyne-linux-x64.zst
+cp package.json <repo>/binaries-native/package.json
+```
+
+Then update `built_from_commit` in `config.yaml`. Verify before committing —
+`podman run --rm -v $PWD/binaries:/b:ro debian:bookworm-slim /b/xyne-linux-x64 --version`
+should print a version, not a `graceful-fs` stack trace.
+
+**How a run proves it used the native engine.** A binary built before the kernel
+landed treats `XYNE_NATIVE_HARNESS=1` as an unknown variable, runs the embedded
+engine, and says nothing about it — a silent wrong-engine measurement. Three
+independent checks close that:
+
+| # | Check | When | On failure |
+|---|---|---|---|
+| 1 | Probe with a deliberately invalid `XYNE_NATIVE_PROFILE`; a kernel-capable binary rejects it by name before any model call (zero tokens, zero network) | `install()`, before credentials are written | **raises** — the task never runs |
+| 2 | `[tb-native] XYNE_NATIVE_HARNESS=1 XYNE_NATIVE_PROFILE=standard` echoed into `/logs/agent/xyne.log` ahead of the turn | every trial | visible in the dashboard log viewer |
+| 3 | Session-log header line: the two engines write deliberately incompatible headers (`xyne-native-session` vs `session`) | after the graded turn | error log + `verdict` in `<trial>/agent/engine.json` and `AgentContext.metadata` |
+
+Check 3 is evidence produced *by* the graded run rather than an assertion about
+it. `engine.json` reads:
+
+```json
+{ "expected": "native-plugin-kernel", "profile": "standard",
+  "verdict": "native", "native_files": 1, "embedded_files": 0 }
+```
+
+A `verdict` of `embedded` means the flag did not take and that trial's numbers
+describe the wrong runtime.
 
 ## Notes
 

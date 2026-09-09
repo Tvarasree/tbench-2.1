@@ -32,3 +32,10 @@ venv/
 /binaries
 binaries/xyne-linux-*
 binaries/package.json
+
+# Native-harness binary. The 33 MB zstd ARCHIVE and the package.json beside it
+# ARE committed (setup.sh decompresses them on the VM); the 112 MB decompressed
+# binary is a build output and is not.
+binaries-native/xyne-linux-x64
+binaries-native/xyne-linux-arm64
+

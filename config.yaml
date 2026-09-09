@@ -66,6 +66,12 @@ agents:
     model_format: "juspay/{MODEL}"
     description: "Custom adapter: uploads xyne-linux-{arch} binary, runs `xyne prompt`"
 
+  xyne-cli-native:
+    kind: custom
+    import_path: xyne_native_harbor_agent.agent:XyneNativeCliAgent
+    model_format: "juspay/{MODEL}"
+    description: "Same CLI on its NATIVE plugin-kernel engine (XYNE_NATIVE_HARNESS=1)"
+
   claude-code:
     kind: harbor-builtin
     model_format: "{MODEL}"
@@ -133,6 +139,26 @@ dataset:
 xyne_binary:
   local_dir: binaries                  # repo-relative; adapter's DEFAULT_BINARY_DIR
   npm_package: "@xyne/xyne-cli"        # resolved against https://registry.npmjs.org
+
+# =============================================================================
+# XYNE-CLI NATIVE HARNESS BINARY (committed, zstd-compressed)
+# =============================================================================
+# The native (Cordis plugin-kernel) engine lives on the unmerged
+# `feat/native-harness` branch and is NOT on npm: registry `latest` tracks
+# master, which has no kernel code. Building it on the VM was tried and
+# rejected — that branch does not build from a clean checkout (README "Native
+# harness" documents the three defects and the one-line webpack fix).
+#
+# So the binary is built by hand, zstd-compressed to 33 MB, and COMMITTED here.
+# setup.sh just decompresses it; `zstd` is already a verified dependency.
+# Rebuild instructions live in the README — the binary is NOT reproducible from
+# an unpatched checkout, so record the commit it came from when you replace it.
+xyne_native_binary:
+  local_dir: binaries-native           # repo-relative; adapter's DEFAULT_BINARY_DIR
+  archive: binaries-native/xyne-linux-x64.zst
+  built_from_ref: feat/native-harness
+  built_from_commit: d7d59564          # xyne-cli @ 0.4.4
+  profile: standard                    # XYNE_NATIVE_PROFILE the adapter passes
 
 # =============================================================================
 # GOOGLE ARTIFACT REGISTRY (task image cache)

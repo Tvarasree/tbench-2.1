@@ -578,6 +578,54 @@ PY
 }
 
 # ---------------------------------------------------------------------------
+# 9b. xyne-cli NATIVE-harness binary — decompressed from a COMMITTED artifact.
+#
+# The native (Cordis plugin-kernel) engine is opt-in at runtime via
+# XYNE_NATIVE_HARNESS=1, but it only exists on the unmerged `feat/native-harness`
+# branch. npm `latest` tracks master, which has NO kernel code, so step 9 can
+# never serve the xyne-cli-native agent.
+#
+# Building it here was tried and rejected: that branch is not buildable from a
+# clean checkout (see README "Native harness" for the three defects and the
+# webpack fix). So the binary is built by hand, zstd-compressed, and COMMITTED
+# to this repo — 33 MB, well under GitHub's limits, and `zstd` is already a
+# verified dependency of this setup. Decompressing is the entire step.
+#
+# Best-effort: a failure warns and returns 0, because only the xyne-cli-native
+# agent depends on it. It must never take down xyne-cli or a harbor built-in.
+# ---------------------------------------------------------------------------
+setup_xyne_native_binary() {
+  header "xyne-cli native-harness binary (committed artifact)"
+
+  local out_dir="${SCRIPT_DIR}/binaries-native"
+  local archive="${out_dir}/xyne-linux-x64.zst"
+  local binary="${out_dir}/xyne-linux-x64"
+
+  if [ -s "${binary}" ]; then
+    ok "native xyne binary already present at ${binary}"
+    return 0
+  fi
+  if [ ! -s "${archive}" ]; then
+    warn "No committed native binary at ${archive}"
+    warn "  Only the xyne-cli-native agent is affected; see README 'Native harness'."
+    return 0
+  fi
+  if ! command_exists zstd; then
+    warn "zstd not available — cannot decompress ${archive}"
+    return 0
+  fi
+  if ! zstd -d -f -q "${archive}" -o "${binary}"; then
+    warn "Failed to decompress ${archive} — only xyne-cli-native is affected"
+    return 0
+  fi
+  chmod +x "${binary}"
+  if [ ! -s "${out_dir}/package.json" ]; then
+    warn "package.json missing next to ${binary}; the adapter reads it there"
+  fi
+  ok "native xyne binary ready -> ${binary} ($(du -h "${binary}" | cut -f1))"
+}
+
+# ---------------------------------------------------------------------------
 # 10. .env template (don't clobber secrets).
 # ---------------------------------------------------------------------------
 write_env_file() {
@@ -643,6 +691,8 @@ verify() {
   check "pi adapter import"     "uv tool run --from harbor python -c 'import pi_harbor_agent.agent'"
   check "dataset cache"         "[ -n \"\$(find \$HOME/.cache/harbor -name task.toml 2>/dev/null | head -1)\" ]"
   check "xyne linux binary"     "[ -s \"${SCRIPT_DIR}/binaries/xyne-linux-x64\" ] || [ -s \"${SCRIPT_DIR}/binaries/xyne-linux-arm64\" ]"
+  check "xyne native adapter"   "uv tool run --from harbor python -c 'import xyne_native_harbor_agent.agent'"
+  check "xyne native binary"    "[ -s \"${SCRIPT_DIR}/binaries-native/xyne-linux-x64\" ]"
   check "gcloud-env.sh"         "[ -f /var/lib/docker/gcloud-env.sh ] || [ \"\$(uname -s)\" != Linux ]"
   check "run.sh executable"     "[ -x \"${SCRIPT_DIR}/run.sh\" ]"
   check "git"                   "command_exists git"
@@ -677,6 +727,7 @@ main() {
   setup_python_deps
   setup_dataset
   setup_xyne_binaries
+  setup_xyne_native_binary
   write_env_file
   create_cli_path_helper
   verify

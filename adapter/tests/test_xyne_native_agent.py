@@ -1,0 +1,323 @@
+#!/usr/bin/env python3
+"""Contract for the Terminal-Bench xyne-cli NATIVE-harness adapter.
+
+The value of this agent is entirely that it runs a DIFFERENT engine from
+`xyne-cli`. Every test here defends one of the three things that make that
+claim checkable rather than assumed:
+
+  * the run command actually carries XYNE_NATIVE_HARNESS=1 and logs it,
+  * install() refuses a binary that ignores the flag,
+  * the session reader distinguishes the two engines and reads the native
+    token ledger (the embedded reader would report zero).
+"""
+from __future__ import annotations
+
+import asyncio
+import importlib
+import json
+import pathlib
+import sys
+import tempfile
+import types
+import unittest
+
+
+ADAPTER_ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ADAPTER_ROOT))
+
+from xyne_native_harbor_agent.session_usage import (  # noqa: E402
+    ENGINE_EMBEDDED,
+    ENGINE_NATIVE,
+    classify_session_file,
+    scan_engines,
+    sum_session_usage,
+    to_harbor_fields,
+)
+
+
+NATIVE_HEADER = {
+    "type": "xyne-native-session",
+    "version": 1,
+    "id": "s1",
+    "timestamp": "2026-09-09T00:00:00.000Z",
+    "cwd": "/app",
+}
+EMBEDDED_HEADER = {"type": "session", "id": "p1", "cwd": "/app"}
+
+
+def _module(name: str) -> types.ModuleType:
+    module = types.ModuleType(name)
+    sys.modules[name] = module
+    return module
+
+
+def _install_fake_harbor() -> None:
+    _module("harbor")
+    _module("harbor.agents")
+    _module("harbor.agents.installed")
+    installed_base = _module("harbor.agents.installed.base")
+    _module("harbor.environments")
+    environments_base = _module("harbor.environments.base")
+    _module("harbor.models")
+    _module("harbor.models.agent")
+    agent_context = _module("harbor.models.agent.context")
+
+    class BaseInstalledAgent:
+        pass
+
+    installed_base.BaseInstalledAgent = BaseInstalledAgent
+    installed_base.with_prompt_template = lambda function: function
+    environments_base.BaseEnvironment = object
+    agent_context.AgentContext = object
+
+
+def _write_jsonl(path: pathlib.Path, records: list[dict]) -> None:
+    path.write_text(
+        "".join(json.dumps(record) + "\n" for record in records), encoding="utf-8"
+    )
+
+
+def _ledger(inp: int, out: int, cache_read: int = 0, cache_write: int = 0) -> dict:
+    return {
+        "type": "xyne-native-session-entry",
+        "kind": "llm_usage",
+        "sessionId": "s1",
+        "at": "2026-09-09T00:00:01.000Z",
+        "data": {
+            "usage": {
+                "inputTokens": inp,
+                "outputTokens": out,
+                "cacheReadTokens": cache_read,
+                "cacheWriteTokens": cache_write,
+            },
+            "finishReason": "stop",
+        },
+    }
+
+
+class NativeAgentCommandTest(unittest.TestCase):
+    def tearDown(self) -> None:
+        for name in tuple(sys.modules):
+            if name == "harbor" or name.startswith("harbor."):
+                sys.modules.pop(name, None)
+        sys.modules.pop("xyne_native_harbor_agent.agent", None)
+
+    def _agent(self):
+        _install_fake_harbor()
+        module = importlib.import_module("xyne_native_harbor_agent.agent")
+        return module, module.XyneNativeCliAgent()
+
+    def test_run_sets_and_logs_the_native_harness_flag(self) -> None:
+        """The whole point of this agent: the flag must reach the container.
+
+        Catches a silent regression to the embedded engine — the failure mode
+        with no symptom, where every task still runs and every number is about
+        the wrong runtime.
+        """
+        module, agent = self._agent()
+        commands: list[str] = []
+
+        async def exec_as_root(environment: object, command: str) -> None:
+            commands.append(command)
+
+        agent.exec_as_root = exec_as_root
+        asyncio.run(agent.run("repair /app", object(), object()))
+
+        self.assertEqual(len(commands), 1)
+        command = commands[0]
+        # The flag must prefix the actual invocation, not merely appear
+        # somewhere in the line (the echo alone would satisfy a loose check).
+        self.assertIn(
+            "XYNE_NATIVE_HARNESS=1 XYNE_NATIVE_PROFILE=standard xyne prompt",
+            command,
+        )
+        # --yolo is mandatory: without it every mutating tool call stalls at
+        # the permission gate and no task can be solved.
+        self.assertIn("--yolo", command)
+        # No --tools allow-list: absence means "activate everything registered".
+        self.assertNotIn("--tools", command)
+        # The flag must be greppable in the per-trial log, not just in run.sh.
+        self.assertIn("[tb-native]", command)
+        self.assertIn("tee /logs/agent/xyne.log", command)
+
+    def test_agent_name_is_distinct_from_the_embedded_adapter(self) -> None:
+        module, agent = self._agent()
+        self.assertEqual(module.XyneNativeCliAgent.name(), "xyne-cli-native")
+        self.assertTrue(str(agent._binary_dir()).endswith("binaries-native"))
+
+    def test_probe_accepts_a_binary_that_rejects_the_bogus_profile(self) -> None:
+        module, agent = self._agent()
+
+        class Result:
+            stdout = (
+                'Execution failed: XYNE_NATIVE_PROFILE="__tb_native_probe__" is '
+                "not a known native profile; expected one of: standard, minimal"
+            )
+            stderr = ""
+
+        class Env:
+            async def exec(self, command: str, user: str) -> Result:
+                assert "XYNE_NATIVE_HARNESS=1" in command
+                return Result()
+
+        agent.logger = types.SimpleNamespace(info=lambda *a, **k: None)
+        asyncio.run(agent._assert_native_engine_available(Env()))
+
+    def test_probe_rejects_a_binary_that_ignores_the_flag(self) -> None:
+        """A pre-kernel binary treats the flag as unknown and runs embedded.
+
+        Without this gate the run proceeds and silently benchmarks the wrong
+        engine, which is worse than failing.
+        """
+        module, agent = self._agent()
+
+        class Result:
+            stdout = "Execution failed: No provider configured"
+            stderr = ""
+
+        class Env:
+            async def exec(self, command: str, user: str) -> Result:
+                return Result()
+
+        agent.logger = types.SimpleNamespace(info=lambda *a, **k: None)
+        with self.assertRaises(RuntimeError) as caught:
+            asyncio.run(agent._assert_native_engine_available(Env()))
+        self.assertIn("does not support the native harness", str(caught.exception))
+
+
+class NativeSessionUsageTest(unittest.TestCase):
+    def test_header_line_identifies_the_engine(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            native = root / "a.jsonl"
+            embedded = root / "b.jsonl"
+            _write_jsonl(native, [NATIVE_HEADER, _ledger(10, 5)])
+            _write_jsonl(embedded, [EMBEDDED_HEADER])
+            self.assertEqual(classify_session_file(native), ENGINE_NATIVE)
+            self.assertEqual(classify_session_file(embedded), ENGINE_EMBEDDED)
+
+            scan = scan_engines(root)
+            self.assertEqual(scan["verdict"], "mixed")
+            self.assertEqual(scan["native_files"], 1)
+            self.assertEqual(scan["embedded_files"], 1)
+
+    def test_verdict_is_embedded_when_the_flag_did_not_take(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            _write_jsonl(root / "b.jsonl", [EMBEDDED_HEADER])
+            self.assertEqual(scan_engines(root)["verdict"], "embedded")
+
+    def test_sums_the_llm_usage_ledger_across_nested_dirs(self) -> None:
+        """Native sessions live under sessions/<encoded-cwd>/, not the root."""
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            nested = root / "-app"
+            nested.mkdir()
+            _write_jsonl(
+                nested / "a.jsonl",
+                [NATIVE_HEADER, _ledger(100, 20, 300, 40), _ledger(5, 1)],
+            )
+            totals = sum_session_usage(root)
+            assert totals is not None
+            self.assertEqual(totals["ledger_rows"], 2)
+            self.assertEqual(totals["inputTokens"], 105)
+            self.assertEqual(totals["outputTokens"], 21)
+            self.assertEqual(totals["cacheReadTokens"], 300)
+            self.assertEqual(totals["cacheWriteTokens"], 40)
+
+            fields = to_harbor_fields(totals)
+            # harbor's n_input_tokens includes cache read + write.
+            self.assertEqual(fields["n_input_tokens"], 105 + 300 + 40)
+            self.assertEqual(fields["n_cache_tokens"], 300)
+            self.assertEqual(fields["n_output_tokens"], 21)
+            # Native ledger rows carry no cost; unpriced must stay None so the
+            # reporter's --price-* inputs supply the money figures.
+            self.assertIsNone(fields["cost_usd"])
+
+    def test_embedded_sessions_never_contribute(self) -> None:
+        """A shared directory must not let pi's counters leak into native totals."""
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            _write_jsonl(
+                root / "pi.jsonl",
+                [
+                    EMBEDDED_HEADER,
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "usage": {"input": 999, "output": 999},
+                        },
+                    },
+                ],
+            )
+            self.assertIsNone(sum_session_usage(root))
+
+    def test_ledger_rows_suppress_the_legacy_fallback(self) -> None:
+        """Mirrors sumNativeUsage: never add both, or a mixed log double counts."""
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            _write_jsonl(
+                root / "a.jsonl",
+                [
+                    NATIVE_HEADER,
+                    _ledger(100, 20),
+                    {
+                        "type": "xyne-native-session-entry",
+                        "kind": "assistant_message",
+                        "data": {"usage": {"inputTokens": 7, "outputTokens": 3}},
+                    },
+                ],
+            )
+            totals = sum_session_usage(root)
+            assert totals is not None
+            self.assertEqual(totals["inputTokens"], 100)
+            self.assertEqual(totals["outputTokens"], 20)
+            self.assertEqual(totals["fallback_messages"], 0)
+
+    def test_legacy_assistant_usage_used_only_without_a_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            _write_jsonl(
+                root / "a.jsonl",
+                [
+                    NATIVE_HEADER,
+                    {
+                        "type": "xyne-native-session-entry",
+                        "kind": "assistant_message",
+                        "data": {"usage": {"inputTokens": 7, "outputTokens": 3}},
+                    },
+                ],
+            )
+            totals = sum_session_usage(root)
+            assert totals is not None
+            self.assertEqual(totals["fallback_messages"], 1)
+            self.assertEqual(totals["inputTokens"], 7)
+
+    def test_truncated_final_line_does_not_lose_earlier_rows(self) -> None:
+        """A trial killed on timeout leaves a half-written last line."""
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            path = root / "a.jsonl"
+            path.write_text(
+                json.dumps(NATIVE_HEADER) + "\n"
+                + json.dumps(_ledger(50, 10)) + "\n"
+                + '{"type":"xyne-native-session-entry","kind":"llm_u',
+                encoding="utf-8",
+            )
+            totals = sum_session_usage(root)
+            assert totals is not None
+            self.assertEqual(totals["ledger_rows"], 1)
+            self.assertEqual(totals["inputTokens"], 50)
+
+    def test_absent_or_unmeasured_dir_reports_nothing_rather_than_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            self.assertIsNone(sum_session_usage(root / "missing"))
+            _write_jsonl(root / "a.jsonl", [NATIVE_HEADER])
+            self.assertIsNone(sum_session_usage(root))
+            self.assertEqual(scan_engines(root / "missing")["verdict"], "none")
+
+
+if __name__ == "__main__":
+    unittest.main()

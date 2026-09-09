@@ -6,7 +6,7 @@ dependencies = []
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["xyne_harbor_agent*", "pi_harbor_agent*", "tb_harbor_compat*"]
+include = ["xyne_harbor_agent*", "xyne_native_harbor_agent*", "pi_harbor_agent*", "tb_harbor_compat*"]
 
 [build-system]
 requires = ["setuptools>=68"]

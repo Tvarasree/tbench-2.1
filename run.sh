@@ -75,8 +75,11 @@ Selection (mutually exclusive; default: --task regex-log):
 
 Model & agent:
   --model NAME           grid.ai model id (default: private-large)
-  --coding-agent NAME    Agent: xyne-cli (default), claude-code, opencode,
-                         pi, aider, goose, codex   (alias: --agent)
+  --coding-agent NAME    Agent: xyne-cli (default), xyne-cli-native,
+                         claude-code, opencode, pi, aider, goose, codex
+                         (alias: --agent). xyne-cli-native is the same CLI on
+                         its native plugin-kernel engine (XYNE_NATIVE_HARNESS=1),
+                         built from the feat/native-harness branch by setup.sh.
   --base-url URL         API base (default: https://grid.ai.juspay.net/v1)
   --concurrency N        harbor --n-concurrent (default: 1)
   --attempts N           harbor --n-attempts / pass@k (default: 3)
@@ -227,8 +230,9 @@ trap cleanup_on_exit EXIT
 verify_selected_adapter() {
   local module=""
   case "$AGENT" in
-    xyne-cli) module="xyne_harbor_agent.agent" ;;
-    pi)       module="pi_harbor_agent.agent" ;;
+    xyne-cli)        module="xyne_harbor_agent.agent" ;;
+    xyne-cli-native) module="xyne_native_harbor_agent.agent" ;;
+    pi)              module="pi_harbor_agent.agent" ;;
     *)        return 0 ;;
   esac
 
@@ -467,6 +471,7 @@ done
 
 declare -A _MODEL_FMT=(
   [xyne-cli]="juspay/{MODEL}"
+  [xyne-cli-native]="juspay/{MODEL}"
   [claude-code]="{MODEL}"
   [opencode]="Grid/{MODEL}"
   [pi]="juspay/{MODEL}"
@@ -482,6 +487,16 @@ AGENT_FLAGS=()
 if [ "$AGENT" = "xyne-cli" ]; then
   AGENT_FLAGS=(
     --agent-import-path xyne_harbor_agent.agent:XyneCliAgent
+    --agent-env "XYNE_API_KEY=${XYNE_API_KEY}"
+    --agent-env "XYNE_BASE_URL=${BASE_URL}"
+  )
+elif [ "$AGENT" = "xyne-cli-native" ]; then
+  # Same credentials as xyne-cli; the engine switch lives INSIDE the container
+  # (the adapter prefixes every `xyne` call with XYNE_NATIVE_HARNESS=1), not in
+  # these host-side flags. Keeping it there means the flag is recorded in the
+  # per-trial agent log rather than only in this script's output.
+  AGENT_FLAGS=(
+    --agent-import-path xyne_native_harbor_agent.agent:XyneNativeCliAgent
     --agent-env "XYNE_API_KEY=${XYNE_API_KEY}"
     --agent-env "XYNE_BASE_URL=${BASE_URL}"
   )
