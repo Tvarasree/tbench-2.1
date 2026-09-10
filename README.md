@@ -271,7 +271,7 @@ is no separate binary mode or entrypoint.
 `feat/native-harness` branch and is **not on npm** — registry `latest` tracks
 `master`, which has no kernel code. Building it on the VM was tried and
 rejected: **that branch does not build from a clean checkout.** Three defects,
-each still present at xyne-cli `c9134b90` (rebuilt 2026-09-10):
+each still present at xyne-cli `4202023f` (rebuilt 2026-09-10):
 
 1. `build:webpack-bundle` fails — webpack cannot resolve `@xyne/protocol`.
    `tsconfig.json` maps it via `paths` (tsc only); `webpack.config.cjs` has no
@@ -299,6 +299,15 @@ fix": `seedDefaultModel()` at boot plus `input.model ?? llm.defaultModelId?.()`
 in the loop). **Any binary built before `f7a41fb9` advertises no tools and
 cannot solve a single task** — check `request_header.toolNames` in
 `agent/sessions/**/*.jsonl` before trusting a run.
+
+**Second dry run (2026-09-10, `c9134b90`) scored 40% (2/5).** Tools worked; the
+losses were two xyne-cli engine caps, both hit deterministically: the native
+loop's 32-step limit (`core-agent-loop` `maxSteps ?? 32`) cut off the
+many-step tasks, and the 8192 default max-output-tokens
+(`llm-pi-ai/models.ts`) truncated single-message file writes
+(`finishReason: length`). xyne-cli lifted both in `4202023f` — `maxSteps ?? 200`
+and `maxTokens ?? 32000`. The committed binary is built from `4202023f`; a
+run's requests now carry `max_completion_tokens: 32000` (podman-verified).
 
 So the binary is **built by hand and committed**, zstd-compressed to 33.2 MB (under
 GitHub's 50 MB warning threshold; the raw 118 MB would exceed the 100 MB hard
