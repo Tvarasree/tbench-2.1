@@ -157,7 +157,7 @@ xyne_native_binary:
   local_dir: binaries-native           # repo-relative; adapter's DEFAULT_BINARY_DIR
   archive: binaries-native/xyne-linux-x64.zst
   built_from_ref: feat/native-harness
-  built_from_commit: d7d59564          # xyne-cli @ 0.4.4
+  built_from_commit: c9134b90          # xyne-cli @ 0.4.4
   profile: standard                    # XYNE_NATIVE_PROFILE the adapter passes
 
 # =============================================================================
