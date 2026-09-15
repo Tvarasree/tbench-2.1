@@ -138,13 +138,22 @@ export XYNE_API_KEY=sk-...                  # grid.ai key
 ./run.sh my-run-id --task regex-log --agent xyne-cli --model private-large
 ./run.sh my-run-id --all --agent opencode --model glm-latest --attempts 3 --concurrency 10
 ./run.sh KEY my-run-id --range 0-9 --agent claude-code     # explicit API key positional
+./run.sh my-run-id --tasks build-pmars,regex-log,dna-insert  # pick exact tasks by name
 ./run.sh my-run-id --task regex-log --no-gar               # skip GAR, let harbor use Docker Hub
 ./run.sh --help
 ```
 
-Selection is mutually exclusive: `--task`, `--range START-END` (0-indexed
-inclusive), `--limit N`, `--all`. Unknown `--flags` are forwarded to
+Selection is mutually exclusive: `--task`, `--tasks A,B,C`, `--range START-END`
+(0-indexed inclusive), `--limit N`, `--all`. Unknown `--flags` are forwarded to
 `harbor run` verbatim.
+
+`--tasks` takes any number of names, up to the whole dataset. Surrounding
+whitespace is trimmed and duplicates are dropped; the selection is emitted in
+dataset-sorted order, so trial ordering matches `--range`/`--limit`. Any name
+not in the task cache aborts the run before a single image is pulled, and the
+error lists every unknown name at once. Because the dashboard submits every form
+field on each run, `--tasks` **takes precedence over `--range`/`--limit`
+regardless of flag order**; leave the field empty to select by range.
 
 ---
 

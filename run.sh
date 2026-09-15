@@ -69,6 +69,8 @@ Positional:
 
 Selection (mutually exclusive; default: --task regex-log):
   --task NAME            Single task
+  --tasks A,B,C          Comma-separated task names; any count, up to the whole
+                         dataset. Deduplicated; emitted in dataset-sorted order.
   --range START-END      0-indexed inclusive slice of the sorted task list
   --limit N              First N tasks
   --all                  Every task in the dataset
@@ -132,6 +134,11 @@ ATTEMPTS="3"
 AGENT_TIMEOUT_MULT=""
 TASK_SELECTOR=""
 SELECTOR_KIND="task"
+# Explicit task-name list. Kept separate from TASK_SELECTOR so it can take
+# precedence over --range/--limit regardless of the order the runner emits
+# flags in; the dashboard sends every field, so --range arrives even when the
+# operator picked names. Empty (the schema default) means "not chosen".
+TASKS_LIST=""
 USE_GAR=1
 LOG_LEVEL="info"
 # Token pricing, USD per 1,000,000 tokens. Empty = not supplied. Kept as
@@ -147,6 +154,7 @@ EXTRA_HARBOR_FLAGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --task)            TASK_SELECTOR="$2"; SELECTOR_KIND="task";  shift 2 ;;
+    --tasks)           TASKS_LIST="$2";                          shift 2 ;;
     --range)           TASK_SELECTOR="$2"; SELECTOR_KIND="range"; shift 2 ;;
     --limit)           TASK_SELECTOR="$2"; SELECTOR_KIND="limit"; shift 2 ;;
     --all)             TASK_SELECTOR="";   SELECTOR_KIND="all";   shift   ;;
@@ -178,6 +186,12 @@ while [ $# -gt 0 ]; do
     *) log_warn "ignoring unexpected positional: $1"; shift ;;
   esac
 done
+
+# An explicit name list wins over every other selector. Blank (or only commas
+# and whitespace) means the operator left the field empty — ignore it.
+if [ -n "${TASKS_LIST//[[:space:],]/}" ]; then
+  TASK_SELECTOR="$TASKS_LIST"; SELECTOR_KIND="tasks"
+fi
 
 [ "$SELECTOR_KIND" = "task" ] && [ -z "$TASK_SELECTOR" ] && TASK_SELECTOR="regex-log"
 
@@ -310,6 +324,33 @@ select_tasks() {
       for t in "${ALL_TASKS[@]}"; do [ "$t" = "$TASK_SELECTOR" ] && { f=1; break; }; done
       [ "$f" = 1 ] || { log_err "task '$TASK_SELECTOR' not in dataset cache"; exit 1; }
       echo "$TASK_SELECTOR" ;;
+    tasks)
+      # Comma-separated names. Every name must exist, or we fail before any
+      # image pull or model spend — same contract as the single-task branch.
+      local requested=() seen=() name unknown=()
+      IFS=',' read -ra requested <<< "$TASK_SELECTOR"
+      for name in "${requested[@]}"; do
+        name="${name#"${name%%[![:space:]]*}"}"   # ltrim
+        name="${name%"${name##*[![:space:]]}"}"   # rtrim
+        [ -n "$name" ] || continue
+        local found=0 s
+        for s in "${ALL_TASKS[@]}"; do [ "$s" = "$name" ] && { found=1; break; }; done
+        [ "$found" = 1 ] || { unknown+=("$name"); continue; }
+        local dup=0
+        for s in "${seen[@]-}"; do [ "$s" = "$name" ] && { dup=1; break; }; done
+        [ "$dup" = 1 ] || seen+=("$name")
+      done
+      if [ "${#unknown[@]}" -gt 0 ]; then
+        log_err "--tasks: not in dataset cache: ${unknown[*]}"; exit 1
+      fi
+      [ "${#seen[@]}" -gt 0 ] || { log_err "--tasks produced no task names"; exit 1; }
+      # Emit in dataset-sorted order so trial ordering matches --range/--limit.
+      for s in "${ALL_TASKS[@]}"; do
+        for name in "${seen[@]}"; do
+          if [ "$s" = "$name" ]; then printf '%s\n' "$s"; break; fi
+        done
+      done
+      return 0 ;;
     range)
       local s="${TASK_SELECTOR%-*}" e="${TASK_SELECTOR#*-}"
       if ! [[ "$s" =~ ^[0-9]+$ && "$e" =~ ^[0-9]+$ ]] || [ "$s" -gt "$e" ]; then

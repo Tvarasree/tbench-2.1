@@ -6,6 +6,10 @@
     "The eval-runner translates each field name '_' -> '-' and passes it to",
     "run.sh as a named flag, so 'input_token_price' arrives as",
     "'--input-token-price'.",
+    "Task selection: 'tasks' (comma-separated names) and 'range' (0-indexed",
+    "inclusive slice) both map to run.sh selector flags. A non-empty 'tasks'",
+    "ALWAYS wins over 'range', whatever order the flags are sent in, so both",
+    "may be submitted safely. Leave 'tasks' empty to select by range.",
     "Price fields are OPTIONAL and are USD per 1,000,000 tokens. Leave them at",
     "0 to get an unpriced report (available token counts are still shown). Both",
     "input and output must be non-zero for pricing to engage; one alone is never",
@@ -67,10 +71,22 @@
       "type": "number"
     },
     {
+      "constraints": {
+        "regex": "^[0-9]+-[0-9]+$"
+      },
       "default": "0-88",
       "label": "Task Range",
       "name": "range",
-      "pattern": "^[0-9]+-[0-9]+$",
+      "required": false,
+      "type": "text"
+    },
+    {
+      "constraints": {
+        "regex": "^$|^[a-z0-9][a-z0-9._-]*( *, *[a-z0-9][a-z0-9._-]*)*$"
+      },
+      "default": "",
+      "label": "Task Names (comma-separated)",
+      "name": "tasks",
       "required": false,
       "type": "text"
     },
