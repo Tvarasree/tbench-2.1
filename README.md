@@ -291,7 +291,22 @@ each still present at xyne-cli `4202023f` (rebuilt 2026-09-10):
    import time, and Bun's compiled-binary `fs` namespace is non-extensible, so
    `Object.defineProperty` throws before `main()`. Fix: route `graceful-fs` to the
    builtin in `webpack.config.cjs`'s function-based externals —
-   `if (request === 'graceful-fs') return callback(null, 'import node:fs');`
+   `if (request === 'graceful-fs') return callback(null, 'node-commonjs fs');`
+
+   The external type is load-bearing and **must not be `import node:fs`**, which
+   is what this file documented through `4202023f`. `output.type` is `'module'`,
+   so an `import` external is an ASYNC module: webpack emits
+   `module.exports = Promise.resolve().then(...)` and every CJS consumer receives
+   a **Promise** instead of `fs`. Nothing called through it until xyne-cli
+   `c86630c6` added `core-sessions/session-lock.ts`, which takes a synchronous
+   `proper-lockfile` lock on every native session boot. `proper-lockfile`'s
+   adapter does computed access — ``fs[`${method}Sync`]`` — which is `undefined`
+   on a Promise, so the agent dies with
+   ``fs14[`${method}Sync`] is not a function`` after creating `.locks` and before
+   reaching the provider. `node-commonjs` emits a synchronous
+   `createRequire(import.meta.url)('fs')`; the bare `fs` specifier matters too,
+   because `node:fs` is already an ESM external elsewhere and webpack would
+   dedupe onto it and stay async.
 3. `npm install` fails with `EOVERRIDE` — `overrides["@babel/core"]` is `^7.29.7`
    while `devDependencies` pins exact `7.29.7` (bun's `exact = true` in
    `bunfig.toml` rewrote it). Master has caret in both, so this is
@@ -336,9 +351,24 @@ zstd -19 -T0 binaries/xyne-linux-x64 -o <repo>/binaries-native/xyne-linux-x64.zs
 cp package.json <repo>/binaries-native/package.json
 ```
 
-Then update `built_from_commit` in `config.yaml`. Verify before committing —
-`podman run --rm -v $PWD/binaries:/b:ro debian:bookworm-slim /b/xyne-linux-x64 --version`
-should print a version, not a `graceful-fs` stack trace.
+Then update `built_from_commit` in `config.yaml`.
+
+**Verify before committing, and do not use `--version` as the gate.** A binary
+with the defect-2 regression above starts fine, prints its version and passes the
+`XYNE_NATIVE_PROFILE` probe, then dies on the first real session boot. The check
+must drive one full turn against a stub provider and assert all of:
+
+- the probe still prints `is not a known native profile`;
+- the turn exits 0 and a `bash` tool call actually wrote its file;
+- `<sessions>/<encoded-cwd>/*.jsonl` exists with header `xyne-native-session`
+  (the adapter symlinks `~/.xyne/agent/sessions` → `/logs/agent/sessions`, so a
+  layout change here silently loses every log and all token accounting);
+- `request_header.toolNames` is non-empty and `max_completion_tokens` is 32000;
+- at least one `llm_usage` row carries non-zero `inputTokens`/`outputTokens`.
+
+Build the `linux-arm` target alongside `linux-x64` for this: Bun's JSC aborts
+under qemu on an arm64 Mac, so x64 cannot be run locally, and both targets come
+from the same `temp-build/src/index.js`.
 
 **How a run proves it used the native engine.** A binary built before the kernel
 landed treats `XYNE_NATIVE_HARNESS=1` as an unknown variable, runs the embedded
