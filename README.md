@@ -333,7 +333,7 @@ many-step tasks, and the 8192 default max-output-tokens
 and `maxTokens ?? 32000`. The committed binary is built from `4202023f`; a
 run's requests now carry `max_completion_tokens: 32000` (podman-verified).
 
-So the binary is **built by hand and committed**, zstd-compressed to 33.2 MB (under
+So the binary is **built by hand and committed**, zstd-compressed to 35.3 MB (under
 GitHub's 50 MB warning threshold; the raw 118 MB would exceed the 100 MB hard
 limit). `setup.sh` only decompresses it — `zstd` is already a verified dependency.
 
