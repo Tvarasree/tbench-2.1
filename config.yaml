@@ -149,15 +149,15 @@ xyne_binary:
 # rejected — that branch does not build from a clean checkout (README "Native
 # harness" documents the three defects and the one-line webpack fix).
 #
-# So the binary is built by hand, zstd-compressed to 35 MB, and COMMITTED here.
+# So the binary is built by hand, zstd-compressed to 34.1 MB, and COMMITTED here.
 # setup.sh just decompresses it; `zstd` is already a verified dependency.
 # Rebuild instructions live in the README — the binary is NOT reproducible from
 # an unpatched checkout, so record the commit it came from when you replace it.
 xyne_native_binary:
   local_dir: binaries-native           # repo-relative; adapter's DEFAULT_BINARY_DIR
   archive: binaries-native/xyne-linux-x64.zst
-  built_from_ref: feat/native-harness
-  built_from_commit: 3453bb90          # xyne-cli @ 0.4.4 (step retry, compress tool)
+  built_from_ref: master
+  built_from_commit: 1e28d81a          # xyne-cli @ 0.5.0 (master build, DCP tag fix)
   profile: standard                    # XYNE_NATIVE_PROFILE the adapter passes
 
 # =============================================================================
