@@ -153,6 +153,8 @@ class XyneNativeCliAgent(BaseInstalledAgent):
         value = self._get_env("SWE_TRACE")
         if value == "0":
             return False
+        if not value:
+            return self._jev_read_enabled()
         if value == "1" or value.lower() == "true":
             return True
         return self._jev_read_enabled()
