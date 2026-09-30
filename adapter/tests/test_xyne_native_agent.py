@@ -15,11 +15,14 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import logging
+import os
 import pathlib
 import sys
 import tempfile
 import types
 import unittest
+from unittest import mock
 
 
 ADAPTER_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -63,7 +66,11 @@ def _install_fake_harbor() -> None:
     agent_context = _module("harbor.models.agent.context")
 
     class BaseInstalledAgent:
-        pass
+        _parsed_model_name = None
+        logger = logging.getLogger("test_xyne_native_agent")
+
+        def _get_env(self, name: str) -> str:
+            return os.environ.get(name, "")
 
     installed_base.BaseInstalledAgent = BaseInstalledAgent
     installed_base.with_prompt_template = lambda function: function
@@ -121,7 +128,11 @@ class NativeAgentCommandTest(unittest.TestCase):
             commands.append(command)
 
         agent.exec_as_root = exec_as_root
-        asyncio.run(agent.run("repair /app", object(), object()))
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("JUSPAY_API_KEY", None)
+            os.environ.pop("XYNE_API_KEY", None)
+            os.environ.pop("SWE_TRACE", None)
+            asyncio.run(agent.run("repair /app", object(), object()))
 
         self.assertEqual(len(commands), 1)
         command = commands[0]
@@ -139,6 +150,221 @@ class NativeAgentCommandTest(unittest.TestCase):
         # The flag must be greppable in the per-trial log, not just in run.sh.
         self.assertIn("[tb-native]", command)
         self.assertIn("tee /logs/agent/xyne.log", command)
+
+    def test_run_leaves_jev_off_without_a_key(self) -> None:
+        """No JUSPAY_API_KEY -> the command must stay byte-identical to the
+        pre-Jev shape: no JEV_READ_SELECTOR flag, no jev.env sourcing."""
+        module, agent = self._agent()
+        commands: list[str] = []
+
+        async def exec_as_root(environment: object, command: str) -> None:
+            commands.append(command)
+
+        agent.exec_as_root = exec_as_root
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("JUSPAY_API_KEY", None)
+            os.environ.pop("XYNE_API_KEY", None)
+            os.environ.pop("SWE_TRACE", None)
+            asyncio.run(agent.run("repair /app", object(), object()))
+
+        command = commands[0]
+        self.assertNotIn("JEV_READ_SELECTOR", command)
+        self.assertNotIn("jev.env", command)
+        self.assertNotIn("SWE_TRACE", command)
+
+    def test_run_arms_jev_with_key_but_never_inlines_it(self) -> None:
+        """With a key: JEV_READ_SELECTOR=1 prefixes xyne, the uploaded env
+        file is sourced, and the key VALUE never appears in the command."""
+        module, agent = self._agent()
+        commands: list[str] = []
+
+        async def exec_as_root(environment: object, command: str) -> None:
+            commands.append(command)
+
+        agent.exec_as_root = exec_as_root
+        with mock.patch.dict(
+            os.environ, {"JUSPAY_API_KEY": "tb-jev-secret"}
+        ):
+            asyncio.run(agent.run("repair /app", object(), object()))
+
+        command = commands[0]
+        self.assertIn("JEV_READ_SELECTOR=1", command)
+        self.assertIn("xyne prompt", command)
+        self.assertIn("set -a; . /root/.xyne/agent/jev.env; set +a", command)
+        # The echo must record that Jev (and tracing) were armed, greppable
+        # in the log.
+        self.assertIn("JEV_READ_SELECTOR=1 SWE_TRACE=1", command)
+        # Tracing follows Jev by default: payloads land in /logs/agent.
+        self.assertIn("SWE_TRACE=1", command)
+        self.assertIn("SWE_TRACE_DIR=/logs/agent/swe-trace", command)
+        # The key value must never leak into the command line (which both
+        # harbor's debug logger and the tee'd xyne.log capture).
+        self.assertNotIn("tb-jev-secret", command)
+
+    def test_jev_opt_out_overrides_key_presence(self) -> None:
+        """JEV_READ_SELECTOR=0 forces the deterministic path for A/B runs."""
+        module, agent = self._agent()
+        commands: list[str] = []
+
+        async def exec_as_root(environment: object, command: str) -> None:
+            commands.append(command)
+
+        agent.exec_as_root = exec_as_root
+        with mock.patch.dict(
+            os.environ,
+            {"JUSPAY_API_KEY": "tb-jev-secret", "JEV_READ_SELECTOR": "0"},
+        ):
+            asyncio.run(agent.run("repair /app", object(), object()))
+
+        command = commands[0]
+        self.assertNotIn("JEV_READ_SELECTOR=1", command)
+        self.assertNotIn("jev.env", command)
+        self.assertNotIn("SWE_TRACE=1", command)
+
+    def test_swe_trace_opt_out_keeps_jev_but_drops_traces(self) -> None:
+        """SWE_TRACE=0 disables call tracing while Jev stays armed."""
+        module, agent = self._agent()
+        commands: list[str] = []
+
+        async def exec_as_root(environment: object, command: str) -> None:
+            commands.append(command)
+
+        agent.exec_as_root = exec_as_root
+        with mock.patch.dict(
+            os.environ,
+            {"JUSPAY_API_KEY": "tb-jev-secret", "SWE_TRACE": "0"},
+        ):
+            asyncio.run(agent.run("repair /app", object(), object()))
+
+        command = commands[0]
+        self.assertIn("JEV_READ_SELECTOR=1 xyne prompt", command)
+        self.assertNotIn("SWE_TRACE=1", command)
+
+    def test_swe_trace_dir_override(self) -> None:
+        """SWE_TRACE_DIR relocates the trace directory."""
+        module, agent = self._agent()
+        commands: list[str] = []
+
+        async def exec_as_root(environment: object, command: str) -> None:
+            commands.append(command)
+
+        agent.exec_as_root = exec_as_root
+        with mock.patch.dict(
+            os.environ,
+            {
+                "JUSPAY_API_KEY": "tb-jev-secret",
+                "SWE_TRACE_DIR": "/logs/agent/custom-trace",
+            },
+        ):
+            asyncio.run(agent.run("repair /app", object(), object()))
+
+        command = commands[0]
+        self.assertIn("SWE_TRACE_DIR=/logs/agent/custom-trace", command)
+        self.assertNotIn("SWE_TRACE_DIR=/logs/agent/swe-trace", command)
+
+    def test_swe_trace_forced_on_without_jev(self) -> None:
+        """SWE_TRACE=1 collects LLM/tool traces even when Jev is off."""
+        module, agent = self._agent()
+        commands: list[str] = []
+
+        async def exec_as_root(environment: object, command: str) -> None:
+            commands.append(command)
+
+        agent.exec_as_root = exec_as_root
+        with mock.patch.dict(os.environ, {"SWE_TRACE": "1"}):
+            os.environ.pop("JUSPAY_API_KEY", None)
+            os.environ.pop("XYNE_API_KEY", None)
+            asyncio.run(agent.run("repair /app", object(), object()))
+
+        command = commands[0]
+        self.assertIn("SWE_TRACE=1", command)
+        self.assertNotIn("JEV_READ_SELECTOR=1", command)
+
+    def test_run_arms_jev_with_main_model_key_fallback(self) -> None:
+        """XYNE_API_KEY alone (the key every eval already passes) arms Jev."""
+        module, agent = self._agent()
+        commands: list[str] = []
+
+        async def exec_as_root(environment: object, command: str) -> None:
+            commands.append(command)
+
+        agent.exec_as_root = exec_as_root
+        with mock.patch.dict(os.environ, {"XYNE_API_KEY": "tb-main-key"}):
+            os.environ.pop("JUSPAY_API_KEY", None)
+            asyncio.run(agent.run("repair /app", object(), object()))
+
+        command = commands[0]
+        self.assertIn("JEV_READ_SELECTOR=1", command)
+        self.assertIn("xyne prompt", command)
+        self.assertIn("set -a; . /root/.xyne/agent/jev.env; set +a", command)
+        # The key value still never appears in the command line.
+        self.assertNotIn("tb-main-key", command)
+
+    def test_jev_key_prefers_juspay_over_main_model_key(self) -> None:
+        """JUSPAY_API_KEY wins when both are set; XYNE_API_KEY is fallback."""
+        module, agent = self._agent()
+        with mock.patch.dict(
+            os.environ,
+            {"JUSPAY_API_KEY": "jev-specific", "XYNE_API_KEY": "main-key"},
+        ):
+            self.assertEqual(agent._jev_api_key(), "jev-specific")
+        with mock.patch.dict(os.environ, {"XYNE_API_KEY": "main-key"}):
+            os.environ.pop("JUSPAY_API_KEY", None)
+            self.assertEqual(agent._jev_api_key(), "main-key")
+
+    def test_install_uploads_jev_env_file_with_key(self) -> None:
+        """install() writes the key to /root/.xyne/agent/jev.env (mode 600)
+        via a host temp file, keeping it out of every command string."""
+        module, agent = self._agent()
+        uploaded: list[tuple[str, str]] = []
+        execed: list[str] = []
+
+        async def exec_as_root(environment: object, command: str) -> None:
+            execed.append(command)
+
+        async def detect_arch(environment: object) -> str:
+            return "x64"
+
+        async def probe(environment: object) -> None:
+            return None
+
+        agent.exec_as_root = exec_as_root
+        agent._detect_container_arch = detect_arch
+        agent._assert_native_engine_available = probe
+        agent._api_key = lambda: "tb-main-key"
+
+        class FakeEnv:
+            async def upload_file(self, local: str, remote: str) -> None:
+                # Capture contents now; the temp file is deleted on return.
+                uploaded.append((pathlib.Path(local).read_text(), remote))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (pathlib.Path(tmpdir) / "xyne-linux-x64").write_bytes(b"fake")
+            (pathlib.Path(tmpdir) / "package.json").write_text("{}")
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "XYNE_NATIVE_BINARY_DIR": tmpdir,
+                    "JUSPAY_API_KEY": "tb-jev-secret",
+                    "JEV_MODEL": "jev-latest",
+                },
+            ):
+                asyncio.run(agent.install(FakeEnv()))
+
+        remote_paths = [remote for _, remote in uploaded]
+        self.assertIn("/root/.xyne/agent/jev.env", remote_paths)
+        jev_content = next(
+            content
+            for content, remote in uploaded
+            if remote == "/root/.xyne/agent/jev.env"
+        )
+        self.assertIn("JUSPAY_API_KEY=", jev_content)
+        self.assertIn("tb-jev-secret", jev_content)
+        self.assertIn("JEV_MODEL=jev-latest", jev_content)
+        # The file is locked down and never referenced with its value inline.
+        self.assertIn("chmod 600 /root/.xyne/agent/jev.env", execed)
+        for command in execed:
+            self.assertNotIn("tb-jev-secret", command)
 
     def test_agent_name_is_distinct_from_the_embedded_adapter(self) -> None:
         module, agent = self._agent()

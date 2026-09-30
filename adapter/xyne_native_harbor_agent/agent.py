@@ -24,7 +24,28 @@ independent checks close that hole:
 
 Set XYNE_NATIVE_BINARY_DIR (host path) to override the binary location; set
 XYNE_API_KEY in the host shell or via --agent-env XYNE_API_KEY=... on the CLI.
+
+Jev-guided reads
+----------------
+Jev is armed by the same grid.ai credential you already pass for the main
+model: JUSPAY_API_KEY when set, otherwise XYNE_API_KEY (both endpoints live
+on grid.ai.juspay.net and accept the same key). install() uploads the key to
+/root/.xyne/agent/jev.env (mode 600) and run() sources that file before
+every prompt, so the key never appears in a command string or the tee'd
+/logs/agent/xyne.log. Set JEV_READ_SELECTOR=0 in the host environment to
+force the deterministic read path even when a key is installed (for A/B
+runs). JEV_SYSTEMONE_ENDPOINT and JEV_MODEL pass through to the container
+when set in the host environment.
+
+Full call tracing follows Jev by default: SWE_TRACE=1 is set on every prompt
+and SWE_TRACE_DIR defaults to /logs/agent/swe-trace, so harbor downloads the
+exact Jev payloads/responses/errors, LLM requests/responses, tool outputs,
+navigation log, and run summary alongside the session transcripts. Set
+SWE_TRACE=0 in the host environment to opt out; set SWE_TRACE_DIR to relocate
+the trace directory.
 """
+
+from __future__ import annotations
 
 import json
 import os
@@ -63,6 +84,14 @@ NATIVE_PROFILE = "standard"
 PROBE_PROFILE = "__tb_native_probe__"
 PROBE_EXPECTED = "is not a known native profile"
 
+# Jev read-selector wiring. The key is uploaded as a shell-sourceable file
+# (never inline in a command) and sourced before each prompt; see run().
+JEV_ENV_FILE = "/root/.xyne/agent/jev.env"
+
+# Full call tracing (Jev payloads, LLM calls, tool outputs). The directory
+# sits inside /logs/agent so harbor downloads it with the session logs.
+SWE_TRACE_DIR_DEFAULT = "/logs/agent/swe-trace"
+
 
 class XyneNativeCliAgent(BaseInstalledAgent):
     """Run xyne-cli's native kernel engine against grid.ai inside a harbor sandbox."""
@@ -90,6 +119,46 @@ class XyneNativeCliAgent(BaseInstalledAgent):
 
     def _base_url(self) -> str:
         return self._get_env("XYNE_BASE_URL") or DEFAULT_BASE_URL
+
+    def _jev_api_key(self) -> str | None:
+        """Credential for Jev-guided reads; empty/absent leaves Jev off.
+
+        JUSPAY_API_KEY wins when set; otherwise the main model's XYNE_API_KEY
+        is reused, because the SystemOne endpoint and the completions endpoint
+        share the same grid.ai.juspay.net auth realm.
+        """
+        return (
+            self._get_env("JUSPAY_API_KEY")
+            or self._get_env("XYNE_API_KEY")
+            or None
+        )
+
+    def _jev_read_enabled(self) -> bool:
+        """Jev runs only with a key and without an explicit opt-out.
+
+        JEV_READ_SELECTOR=0 in the host environment forces the deterministic
+        (non-Jev) read path even when a key is installed, so A/B runs can
+        share every other setting.
+        """
+        return self._jev_api_key() is not None and (
+            self._get_env("JEV_READ_SELECTOR") != "0"
+        )
+
+    def _swe_trace_enabled(self) -> bool:
+        """Full call tracing follows Jev by default; SWE_TRACE=0 opts out.
+
+        SWE_TRACE=1/true in the host environment forces tracing on even when
+        Jev is off, so LLM/tool traces can be collected independently.
+        """
+        value = self._get_env("SWE_TRACE")
+        if value == "0":
+            return False
+        if value == "1" or value.lower() == "true":
+            return True
+        return self._jev_read_enabled()
+
+    def _swe_trace_dir(self) -> str:
+        return self._get_env("SWE_TRACE_DIR") or SWE_TRACE_DIR_DEFAULT
 
     def get_version_command(self) -> str | None:
         return "xyne --version"
@@ -312,6 +381,36 @@ class XyneNativeCliAgent(BaseInstalledAgent):
                 environment, f"chmod {mode} /root/.xyne/agent/{filename}"
             )
 
+        jev_key = self._jev_api_key()
+        if jev_key:
+            # Shell-sourceable env file: the key reaches the container
+            # without appearing in any command line (harbor's debug logger
+            # and the tee'd /logs/agent/xyne.log capture commands, not file
+            # contents). Written AFTER the native probe, like models.json,
+            # so a kernel-less binary cannot use it.
+            jev_lines = [f"JUSPAY_API_KEY={shlex.quote(jev_key)}"]
+            for var in ("JEV_SYSTEMONE_ENDPOINT", "JEV_MODEL"):
+                value = self._get_env(var)
+                if value:
+                    jev_lines.append(f"{var}={shlex.quote(value)}")
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".env", delete=False
+            ) as tmp:
+                tmp.write("\n".join(jev_lines) + "\n")
+                jev_tmp = tmp.name
+            try:
+                await environment.upload_file(jev_tmp, JEV_ENV_FILE)
+            finally:
+                os.unlink(jev_tmp)
+            await self.exec_as_root(
+                environment, f"chmod 600 {JEV_ENV_FILE}"
+            )
+            self.logger.info(
+                "Jev read selector armed (key installed at %s; "
+                "JEV_READ_SELECTOR=1 will prefix every prompt)",
+                JEV_ENV_FILE,
+            )
+
     @with_prompt_template
     async def run(
         self,
@@ -320,6 +419,24 @@ class XyneNativeCliAgent(BaseInstalledAgent):
         context: AgentContext,
     ) -> None:
         escaped = shlex.quote(instruction)
+        jev_enabled = self._jev_read_enabled()
+        if jev_enabled:
+            # Source the uploaded key file (never inline the value), then
+            # arm the selector. The existence guard keeps run() safe even
+            # if install() and run() disagree about the key's presence.
+            jev_setup = (
+                f"if [ -f {JEV_ENV_FILE} ]; then "
+                f"set -a; . {JEV_ENV_FILE}; set +a; fi; "
+            )
+            jev_flag = " JEV_READ_SELECTOR=1"
+        else:
+            jev_setup = ""
+            jev_flag = ""
+        trace_flag = (
+            f" SWE_TRACE=1 SWE_TRACE_DIR={shlex.quote(self._swe_trace_dir())}"
+            if self._swe_trace_enabled()
+            else ""
+        )
         await self.exec_as_root(
             environment,
             # The env prefix IS the harness switch: session-factory.ts calls
@@ -341,8 +458,10 @@ class XyneNativeCliAgent(BaseInstalledAgent):
             command=(
                 "{ "
                 f"echo '[tb-native] {NATIVE_ENV} "
-                f"XYNE_NATIVE_PROFILE={NATIVE_PROFILE}'; "
-                f"{NATIVE_ENV} XYNE_NATIVE_PROFILE={NATIVE_PROFILE} "
+                f"XYNE_NATIVE_PROFILE={NATIVE_PROFILE}{jev_flag}{trace_flag}'; "
+                f"{jev_setup}"
+                f"{NATIVE_ENV} XYNE_NATIVE_PROFILE={NATIVE_PROFILE}"
+                f"{jev_flag}{trace_flag} "
                 f"xyne prompt {escaped} --yolo 2>&1; "
                 "} | tee /logs/agent/xyne.log"
             ),
