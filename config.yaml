@@ -156,8 +156,8 @@ xyne_binary:
 xyne_native_binary:
   local_dir: binaries-native           # repo-relative; adapter's DEFAULT_BINARY_DIR
   archive: binaries-native/xyne-linux-x64.zst
-  built_from_ref: master
-  built_from_commit: 1e28d81a          # xyne-cli @ 0.5.0 (master build, DCP tag fix)
+  built_from_ref: feat/no_jev
+  built_from_commit: 3bc6e520          # xyne-cli @ 0.5.0 (no Jev)
   profile: standard                    # XYNE_NATIVE_PROFILE the adapter passes
 
 # =============================================================================
