@@ -134,7 +134,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "echo 'Tests skipped for CLI build'",
-    "test:harness": "bun test scripts/eval-runner-support.test.ts scripts/eval-session-trace.test.ts src/agent/bridge.interaction.test.ts src/agent/prompts/generated.test.ts src/agent/runtime/prompt-composition.test.ts src/agent/runtime/tool-heartbeat.test.ts src/agent/runtime/testing/llm-request-capture.test.ts src/agent/runtime/interaction-trace.test.ts src/agent/tools/review-prompt/index.test.ts src/agent/tools/session-name.test.ts src/agent/tools/tool-error-recovery.test.ts src/core/cli/get-turn-error.test.ts src/core/cli/llm-request-wire.integration.test.ts src/core/cli/midstream-retry.integration.test.ts src/core/cli/headless-prompt.integration.test.ts src/core/cli/headless-permission-denied.integration.test.ts scripts/eval-jev-read.test.ts scripts/eval-jev-read-session.test.ts",
+    "test:harness": "bun test scripts/eval-runner-support.test.ts scripts/eval-session-trace.test.ts src/agent/bridge.interaction.test.ts src/agent/prompts/generated.test.ts src/agent/runtime/prompt-composition.test.ts src/agent/runtime/tool-heartbeat.test.ts src/agent/runtime/testing/llm-request-capture.test.ts src/agent/runtime/interaction-trace.test.ts src/agent/tools/review-prompt/index.test.ts src/agent/tools/session-name.test.ts src/agent/tools/tool-error-recovery.test.ts src/core/cli/get-turn-error.test.ts src/core/cli/llm-request-wire.integration.test.ts src/core/cli/midstream-retry.integration.test.ts src/core/cli/headless-prompt.integration.test.ts src/core/cli/headless-permission-denied.integration.test.ts",
     "test:goldens:capture": "XYNE_NATIVE_HARNESS=1 bun run scripts/capture-goldens.ts",
     "test:acceptance": "bun run build:pi-public-package-fixtures && bun test src/agent/kernel/ src/agent/plugins/ src/agent/profiles/ src/agent/adapters/ src/agent/runtime/native-harness-selector.test.ts src/agent/runtime/kernel-backed-runtime.test.ts src/agent/runtime/native-scope-registry.test.ts src/agent/runtime/shared-kernel.test.ts tests/golden-fidelity.test.ts src/agent/session-import/",
     "test:import": "bun test src/agent/session-import/",
@@ -172,10 +172,7 @@
     "release:all": "bun run build:release && node scripts/publish-all.js",
     "build:voice:current": "node scripts/build-voice-current.js",
     "release:native-tarball": "bun run build && bun run build:native-tarball",
-    "build:release": "bun run build:npm && bun run build:voice:release",
-    "eval:jev-read": "bun scripts/eval-jev-read.ts",
-    "typecheck:eval": "bunx tsc -p tsconfig.eval.json --noEmit",
-    "eval:jev-read:session": "bun scripts/eval-jev-read-session.ts"
+    "build:release": "bun run build:npm && bun run build:voice:release"
   },
   "dependencies": {
     "@clack/prompts": "1.7.0",
