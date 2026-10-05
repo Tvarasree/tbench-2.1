@@ -2,25 +2,19 @@
 
 Identical container plumbing to `xyne_harbor_agent`, but the binary comes from
 `binaries-native/` (built from the xyne-cli `feat/native-harness` branch by
-setup.sh) and every `xyne` invocation carries `XYNE_NATIVE_HARNESS=1`.
+setup.sh), and the benchmark prompt carries `XYNE_NATIVE_HARNESS=1`.
 
 Proving the engine actually switched
 ------------------------------------
-`XYNE_NATIVE_HARNESS=1` is a no-op on a binary built before the kernel landed:
-the flag is simply unknown, the embedded-Pi engine runs, and NOTHING in the
-output says so. A whole sweep could silently measure the wrong engine. Three
-independent checks close that hole:
+`run()` echoes `XYNE_NATIVE_HARNESS=1` into `/logs/agent/xyne.log` ahead of
+the turn. `populate_context_post_run()` then reads the session log's header
+line — the native and embedded engines write incompatible headers — and records
+the verdict in `/logs/agent/engine.json` and on harbor's AgentContext. This is
+evidence produced BY the graded run, not an assertion about it.
 
-1. `install()` runs a zero-token probe with a deliberately invalid
-   `XYNE_NATIVE_PROFILE`. A kernel-capable binary rejects it by name before
-   any model call; anything else fails differently. Raises on mismatch, so a
-   stale binary cannot reach a graded task.
-2. `run()` echoes both env vars into `/logs/agent/xyne.log` ahead of the turn,
-   so the dashboard log viewer shows what was set.
-3. `populate_context_post_run()` reads the session log's header line — the two
-   engines write different, deliberately incompatible headers — and records
-   the verdict in `/logs/agent/engine.json` and on harbor's AgentContext.
-   This is evidence produced BY the graded run, not an assertion about it.
+The adapter deliberately does not set `XYNE_NATIVE_PROFILE`. Xyne 0.5.0's
+native selector defaults to `native-extension-platform`, which is the profile
+this benchmark should exercise.
 
 Set XYNE_NATIVE_BINARY_DIR (host path) to override the binary location; set
 XYNE_API_KEY in the host shell or via --agent-env XYNE_API_KEY=... on the CLI.
@@ -32,17 +26,18 @@ model: JUSPAY_API_KEY when set, otherwise XYNE_API_KEY (both endpoints live
 on grid.ai.juspay.net and accept the same key). install() uploads the key to
 /root/.xyne/agent/jev.env (mode 600) and run() sources that file before
 every prompt, so the key never appears in a command string or the tee'd
-/logs/agent/xyne.log. Set JEV_READ_SELECTOR=0 in the host environment to
-force the deterministic read path even when a key is installed (for A/B
-runs). JEV_SYSTEMONE_ENDPOINT and JEV_MODEL pass through to the container
-when set in the host environment.
+/logs/agent/xyne.log. Set JEV_XOR_DECIDER=0 in the host environment to force
+the deterministic read path even when a key is installed (for A/B runs).
+JEV_SYSTEMONE_ENDPOINT and JEV_MODEL pass through to the container when set in
+the host environment.
 
-Full call tracing follows Jev by default: SWE_TRACE=1 is set on every prompt
-and SWE_TRACE_DIR defaults to /logs/agent/swe-trace, so harbor downloads the
-exact Jev payloads/responses/errors, LLM requests/responses, tool outputs,
-navigation log, and run summary alongside the session transcripts. Set
-SWE_TRACE=0 in the host environment to opt out; set SWE_TRACE_DIR to relocate
-the trace directory.
+Jev decision dumps default to /logs/agent/jev-xor. Each qualifying call writes
+payload.json, state.json, response.json, and decision.json under that directory.
+Full main-model/tool tracing is enabled with SWE_TRACE=1 and defaults to
+/logs/agent/swe-trace, so harbor downloads LLM requests/responses, tool
+outputs, navigation logs, and run summaries alongside the session transcripts.
+Set SWE_TRACE=0 in the host environment to opt out; set SWE_TRACE_DIR or
+JEV_XOR_EVAL_DIR to relocate either trace directory.
 """
 
 from __future__ import annotations
@@ -72,25 +67,18 @@ DEFAULT_BASE_URL = "https://grid.ai.juspay.net/v1"
 DEFAULT_PROVIDER = "juspay"
 DEFAULT_MODEL = "private-large"
 
-# The kernel engine and the profile it boots. `standard` is the selector's own
-# default; naming it explicitly keeps the log line self-describing and pins the
-# profile even if that default changes upstream.
+# Keep the native-harness switch, but let Xyne choose its current default
+# native profile (native-extension-platform in xyne-cli 0.5.0).
 NATIVE_ENV = "XYNE_NATIVE_HARNESS=1"
-NATIVE_PROFILE = "standard"
-
-# Install-time positive control. `resolveNativeProfileName` accepts only
-# {standard, minimal} and rejects anything else by name — but ONLY when the
-# kernel is present to read the flag at all. Deliberately invalid.
-PROBE_PROFILE = "__tb_native_probe__"
-PROBE_EXPECTED = "is not a known native profile"
 
 # Jev read-selector wiring. The key is uploaded as a shell-sourceable file
 # (never inline in a command) and sourced before each prompt; see run().
 JEV_ENV_FILE = "/root/.xyne/agent/jev.env"
 
-# Full call tracing (Jev payloads, LLM calls, tool outputs). The directory
-# sits inside /logs/agent so harbor downloads it with the session logs.
+# Full main-model/tool tracing and Jev decision dumps. Both directories sit
+# inside /logs/agent so harbor downloads them with the session logs.
 SWE_TRACE_DIR_DEFAULT = "/logs/agent/swe-trace"
+JEV_XOR_EVAL_DIR_DEFAULT = "/logs/agent/jev-xor"
 
 
 class XyneNativeCliAgent(BaseInstalledAgent):
@@ -136,12 +124,12 @@ class XyneNativeCliAgent(BaseInstalledAgent):
     def _jev_read_enabled(self) -> bool:
         """Jev runs only with a key and without an explicit opt-out.
 
-        JEV_READ_SELECTOR=0 in the host environment forces the deterministic
+        JEV_XOR_DECIDER=0 in the host environment forces the deterministic
         (non-Jev) read path even when a key is installed, so A/B runs can
         share every other setting.
         """
         return self._jev_api_key() is not None and (
-            self._get_env("JEV_READ_SELECTOR") != "0"
+            self._get_env("JEV_XOR_DECIDER") != "0"
         )
 
     def _swe_trace_enabled(self) -> bool:
@@ -159,6 +147,9 @@ class XyneNativeCliAgent(BaseInstalledAgent):
 
     def _swe_trace_dir(self) -> str:
         return self._get_env("SWE_TRACE_DIR") or SWE_TRACE_DIR_DEFAULT
+
+    def _jev_eval_dir(self) -> str:
+        return self._get_env("JEV_XOR_EVAL_DIR") or JEV_XOR_EVAL_DIR_DEFAULT
 
     def get_version_command(self) -> str | None:
         return "xyne --version"
@@ -213,7 +204,6 @@ class XyneNativeCliAgent(BaseInstalledAgent):
                     json.dumps(
                         {
                             "expected": ENGINE_NATIVE,
-                            "profile": NATIVE_PROFILE,
                             **engines,
                         },
                         indent=2,
@@ -242,7 +232,6 @@ class XyneNativeCliAgent(BaseInstalledAgent):
             "usage_source": "xyne-native-llm-usage-ledger",
             "engine_expected": ENGINE_NATIVE,
             "engine_verdict": engines["verdict"] if engines else "unchecked",
-            "native_profile": NATIVE_PROFILE,
             "session_files": totals["files"],
             "ledger_rows": totals["ledger_rows"],
             "fallback_messages": totals["fallback_messages"],
@@ -256,42 +245,6 @@ class XyneNativeCliAgent(BaseInstalledAgent):
         if machine in {"aarch64", "arm64"}:
             return "arm64"
         raise RuntimeError(f"Unsupported container arch: {machine!r}")
-
-    async def _assert_native_engine_available(
-        self, environment: BaseEnvironment
-    ) -> None:
-        """Fail now if this binary ignores the native-harness flag.
-
-        Costs one process spawn, zero tokens and zero network: the selector
-        validates XYNE_NATIVE_PROFILE against its closed set during engine
-        selection, long before a session is booted or a model is called. Run
-        BEFORE models.json is written so a kernel-less binary cannot fall
-        through to a real embedded turn.
-        """
-        result = await environment.exec(
-            command=(
-                f"{NATIVE_ENV} XYNE_NATIVE_PROFILE={PROBE_PROFILE} "
-                "xyne prompt tb-native-probe --yolo "
-                "2>&1 | tee /logs/agent/native-harness-probe.log; true"
-            ),
-            user="root",
-        )
-        output = (result.stdout or "") + (result.stderr or "")
-        if PROBE_EXPECTED not in output:
-            raise RuntimeError(
-                "xyne binary does not support the native harness: probing with "
-                f"XYNE_NATIVE_PROFILE={PROBE_PROFILE} did not produce "
-                f"{PROBE_EXPECTED!r}, so {NATIVE_ENV} would be silently ignored "
-                "and this run would measure the embedded-Pi engine. Rebuild "
-                f"{self._binary_dir()} from the xyne-cli feat/native-harness "
-                "branch (setup.sh does this). Probe output:\n"
-                f"{output.strip()[:2000]}"
-            )
-        self.logger.info(
-            "Native harness confirmed: binary honours %s (profile %s)",
-            NATIVE_ENV,
-            NATIVE_PROFILE,
-        )
 
     async def install(self, environment: BaseEnvironment) -> None:
         binary_dir = self._binary_dir()
@@ -334,10 +287,6 @@ class XyneNativeCliAgent(BaseInstalledAgent):
             environment,
             "chmod +x /opt/xyne/xyne && ln -sf /opt/xyne/xyne /usr/local/bin/xyne",
         )
-
-        # Before any credentials exist, so a kernel-less binary cannot answer
-        # the probe with a real embedded turn.
-        await self._assert_native_engine_available(environment)
 
         model_id = self._model_id()
         models = {
@@ -407,7 +356,7 @@ class XyneNativeCliAgent(BaseInstalledAgent):
             )
             self.logger.info(
                 "Jev read selector armed (key installed at %s; "
-                "JEV_READ_SELECTOR=1 will prefix every prompt)",
+                "JEV_XOR_DECIDER=1 will prefix every prompt)",
                 JEV_ENV_FILE,
             )
 
@@ -428,7 +377,10 @@ class XyneNativeCliAgent(BaseInstalledAgent):
                 f"if [ -f {JEV_ENV_FILE} ]; then "
                 f"set -a; . {JEV_ENV_FILE}; set +a; fi; "
             )
-            jev_flag = " JEV_READ_SELECTOR=1"
+            jev_flag = (
+                f" JEV_XOR_DECIDER=1"
+                f" JEV_XOR_EVAL_DIR={shlex.quote(self._jev_eval_dir())}"
+            )
         else:
             jev_setup = ""
             jev_flag = ""
@@ -457,11 +409,9 @@ class XyneNativeCliAgent(BaseInstalledAgent):
             # can become stale as xyne's tool registry changes.
             command=(
                 "{ "
-                f"echo '[tb-native] {NATIVE_ENV} "
-                f"XYNE_NATIVE_PROFILE={NATIVE_PROFILE}{jev_flag}{trace_flag}'; "
+                f"echo '[tb-native] {NATIVE_ENV}{jev_flag}{trace_flag}'; "
                 f"{jev_setup}"
-                f"{NATIVE_ENV} XYNE_NATIVE_PROFILE={NATIVE_PROFILE}"
-                f"{jev_flag}{trace_flag} "
+                f"{NATIVE_ENV}{jev_flag}{trace_flag} "
                 f"xyne prompt {escaped} --yolo 2>&1; "
                 "} | tee /logs/agent/xyne.log"
             ),

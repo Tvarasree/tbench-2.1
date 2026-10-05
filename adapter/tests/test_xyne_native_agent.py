@@ -138,10 +138,8 @@ class NativeAgentCommandTest(unittest.TestCase):
         command = commands[0]
         # The flag must prefix the actual invocation, not merely appear
         # somewhere in the line (the echo alone would satisfy a loose check).
-        self.assertIn(
-            "XYNE_NATIVE_HARNESS=1 XYNE_NATIVE_PROFILE=standard xyne prompt",
-            command,
-        )
+        self.assertIn("XYNE_NATIVE_HARNESS=1 xyne prompt", command)
+        self.assertNotIn("XYNE_NATIVE_PROFILE", command)
         # --yolo is mandatory: without it every mutating tool call stalls at
         # the permission gate and no task can be solved.
         self.assertIn("--yolo", command)
@@ -153,7 +151,7 @@ class NativeAgentCommandTest(unittest.TestCase):
 
     def test_run_leaves_jev_off_without_a_key(self) -> None:
         """No JUSPAY_API_KEY -> the command must stay byte-identical to the
-        pre-Jev shape: no JEV_READ_SELECTOR flag, no jev.env sourcing."""
+        pre-Jev shape: no JEV_XOR_DECIDER flag, no jev.env sourcing."""
         module, agent = self._agent()
         commands: list[str] = []
 
@@ -168,12 +166,12 @@ class NativeAgentCommandTest(unittest.TestCase):
             asyncio.run(agent.run("repair /app", object(), object()))
 
         command = commands[0]
-        self.assertNotIn("JEV_READ_SELECTOR", command)
+        self.assertNotIn("JEV_XOR_DECIDER", command)
         self.assertNotIn("jev.env", command)
         self.assertNotIn("SWE_TRACE", command)
 
     def test_run_arms_jev_with_key_but_never_inlines_it(self) -> None:
-        """With a key: JEV_READ_SELECTOR=1 prefixes xyne, the uploaded env
+        """With a key: JEV_XOR_DECIDER=1 prefixes xyne, the uploaded env
         file is sourced, and the key VALUE never appears in the command."""
         module, agent = self._agent()
         commands: list[str] = []
@@ -188,12 +186,17 @@ class NativeAgentCommandTest(unittest.TestCase):
             asyncio.run(agent.run("repair /app", object(), object()))
 
         command = commands[0]
-        self.assertIn("JEV_READ_SELECTOR=1", command)
+        self.assertIn("JEV_XOR_DECIDER=1", command)
+        self.assertIn("JEV_XOR_EVAL_DIR=/logs/agent/jev-xor", command)
         self.assertIn("xyne prompt", command)
+        self.assertNotIn("JEV_READ_SELECTOR", command)
         self.assertIn("set -a; . /root/.xyne/agent/jev.env; set +a", command)
         # The echo must record that Jev (and tracing) were armed, greppable
         # in the log.
-        self.assertIn("JEV_READ_SELECTOR=1 SWE_TRACE=1", command)
+        self.assertIn(
+            "JEV_XOR_DECIDER=1 JEV_XOR_EVAL_DIR=/logs/agent/jev-xor SWE_TRACE=1",
+            command,
+        )
         # Tracing follows Jev by default: payloads land in /logs/agent.
         self.assertIn("SWE_TRACE=1", command)
         self.assertIn("SWE_TRACE_DIR=/logs/agent/swe-trace", command)
@@ -202,7 +205,7 @@ class NativeAgentCommandTest(unittest.TestCase):
         self.assertNotIn("tb-jev-secret", command)
 
     def test_jev_opt_out_overrides_key_presence(self) -> None:
-        """JEV_READ_SELECTOR=0 forces the deterministic path for A/B runs."""
+        """JEV_XOR_DECIDER=0 forces the deterministic path for A/B runs."""
         module, agent = self._agent()
         commands: list[str] = []
 
@@ -212,12 +215,12 @@ class NativeAgentCommandTest(unittest.TestCase):
         agent.exec_as_root = exec_as_root
         with mock.patch.dict(
             os.environ,
-            {"JUSPAY_API_KEY": "tb-jev-secret", "JEV_READ_SELECTOR": "0"},
+            {"JUSPAY_API_KEY": "tb-jev-secret", "JEV_XOR_DECIDER": "0"},
         ):
             asyncio.run(agent.run("repair /app", object(), object()))
 
         command = commands[0]
-        self.assertNotIn("JEV_READ_SELECTOR=1", command)
+        self.assertNotIn("JEV_XOR_DECIDER=1", command)
         self.assertNotIn("jev.env", command)
         self.assertNotIn("SWE_TRACE=1", command)
 
@@ -237,7 +240,11 @@ class NativeAgentCommandTest(unittest.TestCase):
             asyncio.run(agent.run("repair /app", object(), object()))
 
         command = commands[0]
-        self.assertIn("JEV_READ_SELECTOR=1 xyne prompt", command)
+        self.assertIn(
+            "JEV_XOR_DECIDER=1 JEV_XOR_EVAL_DIR=/logs/agent/jev-xor xyne prompt",
+            command,
+        )
+        self.assertNotIn("JEV_READ_SELECTOR", command)
         self.assertNotIn("SWE_TRACE=1", command)
 
     def test_swe_trace_dir_override(self) -> None:
@@ -278,7 +285,7 @@ class NativeAgentCommandTest(unittest.TestCase):
 
         command = commands[0]
         self.assertIn("SWE_TRACE=1", command)
-        self.assertNotIn("JEV_READ_SELECTOR=1", command)
+        self.assertNotIn("JEV_XOR_DECIDER=1", command)
 
     def test_run_arms_jev_with_main_model_key_fallback(self) -> None:
         """XYNE_API_KEY alone (the key every eval already passes) arms Jev."""
@@ -294,7 +301,7 @@ class NativeAgentCommandTest(unittest.TestCase):
             asyncio.run(agent.run("repair /app", object(), object()))
 
         command = commands[0]
-        self.assertIn("JEV_READ_SELECTOR=1", command)
+        self.assertIn("JEV_XOR_DECIDER=1", command)
         self.assertIn("xyne prompt", command)
         self.assertIn("set -a; . /root/.xyne/agent/jev.env; set +a", command)
         # The key value still never appears in the command line.
@@ -325,12 +332,8 @@ class NativeAgentCommandTest(unittest.TestCase):
         async def detect_arch(environment: object) -> str:
             return "x64"
 
-        async def probe(environment: object) -> None:
-            return None
-
         agent.exec_as_root = exec_as_root
         agent._detect_container_arch = detect_arch
-        agent._assert_native_engine_available = probe
         agent._api_key = lambda: "tb-main-key"
 
         class FakeEnv:
@@ -370,45 +373,6 @@ class NativeAgentCommandTest(unittest.TestCase):
         module, agent = self._agent()
         self.assertEqual(module.XyneNativeCliAgent.name(), "xyne-cli-native")
         self.assertTrue(str(agent._binary_dir()).endswith("binaries-native"))
-
-    def test_probe_accepts_a_binary_that_rejects_the_bogus_profile(self) -> None:
-        module, agent = self._agent()
-
-        class Result:
-            stdout = (
-                'Execution failed: XYNE_NATIVE_PROFILE="__tb_native_probe__" is '
-                "not a known native profile; expected one of: standard, minimal"
-            )
-            stderr = ""
-
-        class Env:
-            async def exec(self, command: str, user: str) -> Result:
-                assert "XYNE_NATIVE_HARNESS=1" in command
-                return Result()
-
-        agent.logger = types.SimpleNamespace(info=lambda *a, **k: None)
-        asyncio.run(agent._assert_native_engine_available(Env()))
-
-    def test_probe_rejects_a_binary_that_ignores_the_flag(self) -> None:
-        """A pre-kernel binary treats the flag as unknown and runs embedded.
-
-        Without this gate the run proceeds and silently benchmarks the wrong
-        engine, which is worse than failing.
-        """
-        module, agent = self._agent()
-
-        class Result:
-            stdout = "Execution failed: No provider configured"
-            stderr = ""
-
-        class Env:
-            async def exec(self, command: str, user: str) -> Result:
-                return Result()
-
-        agent.logger = types.SimpleNamespace(info=lambda *a, **k: None)
-        with self.assertRaises(RuntimeError) as caught:
-            asyncio.run(agent._assert_native_engine_available(Env()))
-        self.assertIn("does not support the native harness", str(caught.exception))
 
 
 class NativeSessionUsageTest(unittest.TestCase):
