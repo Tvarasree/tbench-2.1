@@ -139,9 +139,12 @@ class XyneNativeCliAgent(BaseInstalledAgent):
         Jev is off, so LLM/tool traces can be collected independently.
         """
         value = self._get_env("SWE_TRACE")
-        if value == "0":
+        if value is None or not value:
+            return self._jev_read_enabled()
+        normalized = value.strip().lower()
+        if normalized in {"0", "false"}:
             return False
-        if value == "1" or value.lower() == "true":
+        if normalized in {"1", "true"}:
             return True
         return self._jev_read_enabled()
 

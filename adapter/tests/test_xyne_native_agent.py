@@ -69,8 +69,11 @@ def _install_fake_harbor() -> None:
         _parsed_model_name = None
         logger = logging.getLogger("test_xyne_native_agent")
 
-        def _get_env(self, name: str) -> str:
-            return os.environ.get(name, "")
+        def _get_env(self, name: str) -> str | None:
+            # Harbor 0.13.1 returns None for an absent variable. Returning ""
+            # here would hide exactly the None-vs-empty bug that broke the
+            # real eval run.
+            return os.environ.get(name)
 
     installed_base.BaseInstalledAgent = BaseInstalledAgent
     installed_base.with_prompt_template = lambda function: function
@@ -183,6 +186,7 @@ class NativeAgentCommandTest(unittest.TestCase):
         with mock.patch.dict(
             os.environ, {"JUSPAY_API_KEY": "tb-jev-secret"}
         ):
+            os.environ.pop("SWE_TRACE", None)
             asyncio.run(agent.run("repair /app", object(), object()))
 
         command = commands[0]
