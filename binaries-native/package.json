@@ -1,6 +1,6 @@
 {
   "name": "@xyne/xyne-cli",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Xyne CLI - A powerful AI assistant in your terminal with file operations, bash mode, drag-and-drop support, and multi-provider AI integration",
   "type": "module",
   "main": "dist/index.js",
@@ -99,7 +99,7 @@
   "scripts": {
     "build:installer": "node scripts/build-installer.js",
     "build:native-tarball": "node scripts/build-native-tarball.js",
-    "build:lib": "bunx tsc -p tsconfig.lib.json",
+    "build:lib": "bunx tsc -p tsconfig.lib.json && node scripts/patch-dist-lib-protocol-imports.mjs",
     "changelog": "node scripts/generate-changelog.js",
     "dev": "bun run build:voice:current && XYNE_ENGINE=native bun run src/index.ts",
     "build:pi-public-package-fixtures": "bun run harness/scripts/build-pi-public-package-fixtures.ts",
@@ -114,7 +114,7 @@
     "build:compile": "bunx tsc --outDir temp-build --declaration false --sourceMap false",
     "build:webpack-bundle": "node scripts/webpack-bundle.js",
     "build:obfuscate": "node scripts/obfuscate-code.js",
-    "build:npm-dist": "mkdir -p dist && cp -r temp-build/* dist/ && mkdir -p dist/src/agent/themes && cp -r src/agent/themes/* dist/src/agent/themes/ && node scripts/copy-patched-packages.js && rm -rf temp-build",
+    "build:npm-dist": "mkdir -p dist && cp -r temp-build/* dist/ && mkdir -p dist/src/agent/themes && cp -r src/agent/themes/* dist/src/agent/themes/ && node scripts/copy-patched-packages.js && node scripts/patch-dist-lib-protocol-imports.mjs && rm -rf temp-build",
     "build:all": "bun run build:npm",
     "build:binary:prepare": "node scripts/ensure-build-optional-deps.js && node scripts/patch-worker-inline.js && node scripts/patch-opentui-render-loop.js",
     "build:binary:release": "bun run build:binary:prepare && mkdir -p binaries && bun run build:binary:linux-x64 && bun run build:binary:linux-arm && bun run build:binary:macos-intel && bun run build:binary:macos-arm && bun run build:binary:windows && node scripts/copy-binaries-to-packages.js",
@@ -272,11 +272,11 @@
     "@opentui/core-linux-arm64": "0.1.93",
     "@opentui/core-linux-x64": "0.1.93",
     "@opentui/core-win32-x64": "0.1.93",
-    "@xyne/xyne-cli-darwin-arm64": "0.5.0",
-    "@xyne/xyne-cli-darwin-x64": "0.5.0",
-    "@xyne/xyne-cli-linux-arm64": "0.5.0",
-    "@xyne/xyne-cli-linux-x64": "0.5.0",
-    "@xyne/xyne-cli-win32-x64": "0.5.0"
+    "@xyne/xyne-cli-darwin-arm64": "0.5.1",
+    "@xyne/xyne-cli-darwin-x64": "0.5.1",
+    "@xyne/xyne-cli-linux-arm64": "0.5.1",
+    "@xyne/xyne-cli-linux-x64": "0.5.1",
+    "@xyne/xyne-cli-win32-x64": "0.5.1"
   },
   "overrides": {
     "fast-uri": "^3.1.5",
