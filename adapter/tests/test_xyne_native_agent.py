@@ -138,10 +138,8 @@ class NativeAgentCommandTest(unittest.TestCase):
         command = commands[0]
         # The flag must prefix the actual invocation, not merely appear
         # somewhere in the line (the echo alone would satisfy a loose check).
-        self.assertIn(
-            "XYNE_NATIVE_HARNESS=1 XYNE_NATIVE_PROFILE=standard xyne prompt",
-            command,
-        )
+        self.assertIn("XYNE_NATIVE_HARNESS=1 xyne prompt", command)
+        self.assertNotIn("XYNE_NATIVE_PROFILE", command)
         # --yolo is mandatory: without it every mutating tool call stalls at
         # the permission gate and no task can be solved.
         self.assertIn("--yolo", command)
@@ -325,12 +323,8 @@ class NativeAgentCommandTest(unittest.TestCase):
         async def detect_arch(environment: object) -> str:
             return "x64"
 
-        async def probe(environment: object) -> None:
-            return None
-
         agent.exec_as_root = exec_as_root
         agent._detect_container_arch = detect_arch
-        agent._assert_native_engine_available = probe
         agent._api_key = lambda: "tb-main-key"
 
         class FakeEnv:
@@ -370,45 +364,6 @@ class NativeAgentCommandTest(unittest.TestCase):
         module, agent = self._agent()
         self.assertEqual(module.XyneNativeCliAgent.name(), "xyne-cli-native")
         self.assertTrue(str(agent._binary_dir()).endswith("binaries-native"))
-
-    def test_probe_accepts_a_binary_that_rejects_the_bogus_profile(self) -> None:
-        module, agent = self._agent()
-
-        class Result:
-            stdout = (
-                'Execution failed: XYNE_NATIVE_PROFILE="__tb_native_probe__" is '
-                "not a known native profile; expected one of: standard, minimal"
-            )
-            stderr = ""
-
-        class Env:
-            async def exec(self, command: str, user: str) -> Result:
-                assert "XYNE_NATIVE_HARNESS=1" in command
-                return Result()
-
-        agent.logger = types.SimpleNamespace(info=lambda *a, **k: None)
-        asyncio.run(agent._assert_native_engine_available(Env()))
-
-    def test_probe_rejects_a_binary_that_ignores_the_flag(self) -> None:
-        """A pre-kernel binary treats the flag as unknown and runs embedded.
-
-        Without this gate the run proceeds and silently benchmarks the wrong
-        engine, which is worse than failing.
-        """
-        module, agent = self._agent()
-
-        class Result:
-            stdout = "Execution failed: No provider configured"
-            stderr = ""
-
-        class Env:
-            async def exec(self, command: str, user: str) -> Result:
-                return Result()
-
-        agent.logger = types.SimpleNamespace(info=lambda *a, **k: None)
-        with self.assertRaises(RuntimeError) as caught:
-            asyncio.run(agent._assert_native_engine_available(Env()))
-        self.assertIn("does not support the native harness", str(caught.exception))
 
 
 class NativeSessionUsageTest(unittest.TestCase):

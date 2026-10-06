@@ -158,7 +158,7 @@ xyne_native_binary:
   archive: binaries-native/xyne-linux-x64.zst
   built_from_ref: master
   built_from_commit: 2f01edd146162ec9cc11f11d088a5a06795d1894  # xyne-cli @ 0.5.1 (master, no Jev)
-  profile: standard                    # XYNE_NATIVE_PROFILE the adapter passes
+  profile: default                     # adapter omits XYNE_NATIVE_PROFILE; xyne uses native-extension-platform
 
 # =============================================================================
 # GOOGLE ARTIFACT REGISTRY (task image cache)

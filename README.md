@@ -241,7 +241,7 @@ terminal-bench/
 │   │   ├── agent.py            # install + `xyne prompt --yolo` + token capture
 │   │   └── session_usage.py    # session-JSONL parser (harbor-free, unit-tested)
 │   └── xyne_native_harbor_agent/   # native plugin-kernel engine
-│       ├── agent.py            # same + XYNE_NATIVE_HARNESS=1, engine probe/verdict
+│       ├── agent.py            # same + XYNE_NATIVE_HARNESS=1, engine verdict
 │       └── session_usage.py    # llm_usage ledger parser + engine classifier
 ├── analysis/
 │   ├── token_sources.py        # native parsers for all seven offered agents
@@ -354,11 +354,9 @@ cp package.json <repo>/binaries-native/package.json
 Then update `built_from_commit` in `config.yaml`.
 
 **Verify before committing, and do not use `--version` as the gate.** A binary
-with the defect-2 regression above starts fine, prints its version and passes the
-`XYNE_NATIVE_PROFILE` probe, then dies on the first real session boot. The check
-must drive one full turn against a stub provider and assert all of:
+with the defect-2 regression above starts fine, prints its version, then dies
+on the first real session boot. The check must drive one full turn against a stub provider and assert all of:
 
-- the probe still prints `is not a known native profile`;
 - the turn exits 0 and a `bash` tool call actually wrote its file;
 - `<sessions>/<encoded-cwd>/*.jsonl` exists with header `xyne-native-session`
   (the adapter symlinks `~/.xyne/agent/sessions` → `/logs/agent/sessions`, so a
@@ -377,15 +375,14 @@ independent checks close that:
 
 | # | Check | When | On failure |
 |---|---|---|---|
-| 1 | Probe with a deliberately invalid `XYNE_NATIVE_PROFILE`; a kernel-capable binary rejects it by name before any model call (zero tokens, zero network) | `install()`, before credentials are written | **raises** — the task never runs |
-| 2 | `[tb-native] XYNE_NATIVE_HARNESS=1 XYNE_NATIVE_PROFILE=standard` echoed into `/logs/agent/xyne.log` ahead of the turn | every trial | visible in the dashboard log viewer |
-| 3 | Session-log header line: the two engines write deliberately incompatible headers (`xyne-native-session` vs `session`) | after the graded turn | error log + `verdict` in `<trial>/agent/engine.json` and `AgentContext.metadata` |
+| 1 | `[tb-native] XYNE_NATIVE_HARNESS=1` echoed into `/logs/agent/xyne.log` ahead of the turn | every trial | visible in the dashboard log viewer |
+| 2 | Session-log header line: the two engines write deliberately incompatible headers (`xyne-native-session` vs `session`) | after the graded turn | error log + `verdict` in `<trial>/agent/engine.json` and `AgentContext.metadata` |
 
-Check 3 is evidence produced *by* the graded run rather than an assertion about
+Check 2 is evidence produced *by* the graded run rather than an assertion about
 it. `engine.json` reads:
 
 ```json
-{ "expected": "native-plugin-kernel", "profile": "standard",
+{ "expected": "native-plugin-kernel",
   "verdict": "native", "native_files": 1, "embedded_files": 0 }
 ```
 
