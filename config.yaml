@@ -157,7 +157,7 @@ xyne_native_binary:
   local_dir: binaries-native           # repo-relative; adapter's DEFAULT_BINARY_DIR
   archive: binaries-native/xyne-linux-x64.zst
   built_from_ref: feat/xor_test_read
-  built_from_commit: f80a1b92          # xyne-cli @ 0.5.0 (jev-guided reads + eval dumps)
+  built_from_commit: be29ba6900cc03432ecbf9654724a169fd63a3ca  # xyne-cli @ 0.5.0 (higher JEV XOR confidence)
   profile: default                     # adapter omits XYNE_NATIVE_PROFILE; xyne 0.5.0 defaults to native-extension-platform
 
 # =============================================================================
