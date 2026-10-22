@@ -19,7 +19,7 @@ as `swe-auto-eval`**, so it drops into the existing eval dashboard pipeline.
 | Dataset | `terminal-bench/terminal-bench-2-1` (89 tasks) cached under `~/.cache/harbor` |
 | Task images | Each `task.toml` declares `[environment].docker_image`. We mirror all 89 into **Google Artifact Registry** once, and pull from GAR every run (no Docker Hub at run time). |
 | Custom agent | `xyne_harbor_agent.agent:XyneCliAgent` — uploads the prebuilt `xyne-linux-{arch}` binary into the task container and runs `xyne prompt --yolo`. `--yolo` is mandatory: headless `xyne prompt` has no interactive approver, so without it every mutating tool call stalls at the permission gate and no task can be solved. |
-| Native-engine agent | `xyne_native_harbor_agent.agent:XyneNativeCliAgent` (`--agent xyne-cli-native`) — the same CLI on its **native plugin-kernel engine**, via `XYNE_NATIVE_HARNESS=1`. See [Native harness](#native-harness-xyne-cli-native). |
+| Native-engine agent | `xyne_native_harbor_agent.agent:XyneNativeCliAgent` (`--agent xyne-cli-native`) — the same CLI on its **native plugin-kernel engine** (the only engine at this branch; `XYNE_NATIVE_HARNESS=1` is now a no-op). See [Native harness](#native-harness-xyne-cli-native). |
 | Other agents | harbor built-ins: `claude-code`, `opencode`, `pi`, `aider`, `goose`, `codex` |
 | Models | grid.ai (juspay), default `private-large`; self-hosted/open-weights for the PoC sweep |
 | Config | `config.yaml` — single source of truth (models, agents, GAR, GCS, defaults) |
@@ -266,11 +266,11 @@ terminal-bench/
 
 ## Native harness (`xyne-cli-native`)
 
-`xyne-cli` ships two engines. The default is the embedded Pi runtime; the
-**native plugin-kernel** engine is opt-in at runtime via `XYNE_NATIVE_HARNESS=1`.
-`session-factory.ts` is the single branch point, and headless `xyne prompt` goes
-through the same factory as the TUI, so the env var is the entire switch — there
-is no separate binary mode or entrypoint.
+`xyne-cli` as of this branch ships a **single engine** — the native plugin-kernel
+runtime. The engine selector (`native-harness-selector.ts`, `selectEngine`) always
+returns `native`; the old `XYNE_NATIVE_HARNESS=1` switch is kept only as a no-op
+transition flag, and the embedded-Pi runtime was removed (`XYNE_ENGINE=embeddedPi`
+now fails loudly). Native is the default — there is no flag to select it.
 
 ```bash
 ./run.sh my-run-id --task regex-log --agent xyne-cli-native --model private-large
@@ -337,19 +337,24 @@ So the binary is **built by hand and committed**, zstd-compressed to 34.1 MB (un
 GitHub's 50 MB warning threshold; the raw 122 MB would exceed the 100 MB hard
 limit). `setup.sh` only decompresses it — `zstd` is already a verified dependency.
 
-To rebuild after the branch moves (**it will not build without the two patches
-above**):
+To rebuild after the branch moves: **at this branch (commit `6944e6b2`) neither
+historical patch is required** — bun workspaces link `packages/protocol` into
+`node_modules/@xyne/protocol`, and `webpack.config.cjs` now externalizes
+`graceful-fs`/`proper-lockfile` itself. (Validated by a full native tool
+round-trip against a stub provider, not just `--version`.)
 
 ```bash
 bun install --frozen-lockfile
-ln -s ../../packages/protocol node_modules/@xyne/protocol      # defect 1
-# apply the graceful-fs external in webpack.config.cjs          # defect 2
-bun run build:protocol && bun run build:compile \
-  && bun run build:webpack-bundle && bun run build:binary:prepare \
-  && bun run build:binary:linux-x64
+bun run build:protocol && bun run build:lib \
+  && bun run build:compile && bun run build:webpack-bundle \
+  && bun run build:voice:current && bun run build:binary:prepare \
+  && bun run build:binary:linux-x64          # add build:binary:linux-arm for the arm64 sibling
 zstd -19 -T0 binaries/xyne-linux-x64 -o <repo>/binaries-native/xyne-linux-x64.zst
 cp package.json <repo>/binaries-native/package.json
 ```
+
+If a future commit reverts the workspace link or the webpack graceful-fs externals,
+re-add the two historical patches above.
 
 Then update `built_from_commit` in `config.yaml`.
 
