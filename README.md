@@ -337,7 +337,7 @@ So the binary is **built by hand and committed**, zstd-compressed to 34.1 MB (un
 GitHub's 50 MB warning threshold; the raw 122 MB would exceed the 100 MB hard
 limit). `setup.sh` only decompresses it — `zstd` is already a verified dependency.
 
-To rebuild after the branch moves: **at this branch (commit `6944e6b2`) neither
+To rebuild after the branch moves: **at this branch (commit `b0d495b3`) neither
 historical patch is required** — bun workspaces link `packages/protocol` into
 `node_modules/@xyne/protocol`, and `webpack.config.cjs` now externalizes
 `graceful-fs`/`proper-lockfile` itself. (Validated by a full native tool
